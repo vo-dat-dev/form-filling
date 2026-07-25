@@ -9,6 +9,12 @@ using System.Text.Json.Serialization;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
+builder.WebHost.ConfigureKestrel(options =>
+{
+    // 50 MB max file; base64 adds ~33% overhead, add JSON wrapper headroom → 100 MB
+    options.Limits.MaxRequestBodySize = 100 * 1024 * 1024;
+});
+
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.TypeInfoResolverChain.Add(ProverbsAgentSerializerContext.Default));
 builder.Services.AddAGUI();
 builder.Services.AddHttpClient();
@@ -231,7 +237,15 @@ public class MinerUAgentFactory
             name: "MinerUAgent",
             description: "A document-processing assistant. When the user uploads a file, it is parsed by MinerU and the extracted content is used to answer questions.");
 
-        var minerUService = new MinerUCloudService(_httpClientFactory, logger);
+        var apiKey = Environment.GetEnvironmentVariable("MINERU_API_KEY")
+            ?? _configuration["MINERU_API_KEY"];
+        var useStandard = string.Equals(
+            Environment.GetEnvironmentVariable("MINERU_USE_STANDARD") ?? _configuration["MINERU_USE_STANDARD"],
+            "true", StringComparison.OrdinalIgnoreCase);
+
+        logger.LogInformation("MinerU mode: {Mode}", useStandard ? "standard" : "agent (lightweight)");
+
+        var minerUService = new MinerUCloudService(_httpClientFactory, logger, apiKey, useStandard);
 
         return new MinerUAgent(chatClientAgent, minerUService, _httpContextAccessor, logger);
     }

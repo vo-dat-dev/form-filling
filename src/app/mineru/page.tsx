@@ -43,7 +43,7 @@ export default function MinerUPage() {
               welcomeMessageText:
                 "👋 Upload a document (PDF, Word, image…) and I'll extract its content so you can ask questions about it.",
             }}
-            attachments={{ enabled: true }}
+            attachments={{ enabled: true, maxSize: 50 * 1024 * 1024 }}
           />
         </main>
       </div>
