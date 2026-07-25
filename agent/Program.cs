@@ -12,6 +12,7 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.TypeInfoResolverChain.Add(ProverbsAgentSerializerContext.Default));
 builder.Services.AddAGUI();
 builder.Services.AddHttpClient();
+builder.Services.AddHttpContextAccessor();
 
 WebApplication app = builder.Build();
 
@@ -19,10 +20,38 @@ WebApplication app = builder.Build();
 var loggerFactory = app.Services.GetRequiredService<ILoggerFactory>();
 var jsonOptions = app.Services.GetRequiredService<IOptions<JsonOptions>>();
 var httpClientFactory = app.Services.GetRequiredService<IHttpClientFactory>();
+var httpContextAccessor = app.Services.GetRequiredService<IHttpContextAccessor>();
 var agentFactory = new ProverbsAgentFactory(builder.Configuration, loggerFactory, jsonOptions.Value.SerializerOptions);
-var minerUFactory = new MinerUAgentFactory(builder.Configuration, loggerFactory, httpClientFactory, jsonOptions.Value.SerializerOptions);
+var minerUFactory = new MinerUAgentFactory(builder.Configuration, loggerFactory, httpClientFactory, httpContextAccessor, jsonOptions.Value.SerializerOptions);
 
+app.UseMiddleware<FileAttachmentMiddleware>();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+
+app.MapGet("/health/mineru", async (IHttpClientFactory factory, ILoggerFactory loggers) =>
+{
+    var logger = loggers.CreateLogger("MinerUHealth");
+    using var client = factory.CreateClient();
+    try
+    {
+        // Hit a non-existent task — mineru.net returns 4xx (not a network error),
+        // which proves we can reach the cloud API.
+        var res = await client.GetAsync("https://mineru.net/api/v1/agent/parse/__health_check__");
+        var body = await res.Content.ReadAsStringAsync();
+        logger.LogInformation("MinerU health: {Status} {Body}", (int)res.StatusCode, body);
+        return Results.Ok(new
+        {
+            reachable = true,
+            httpStatus = (int)res.StatusCode,
+            note = "4xx from mineru.net means network is fine; API requires a valid task_id"
+        });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "MinerU health check failed");
+        return Results.Json(new { reachable = false, error = ex.Message },
+            statusCode: 503);
+    }
+});
 app.MapAGUI("/", agentFactory.CreateProverbsAgent());
 app.MapAGUI("/minerU", minerUFactory.CreateMinerUAgent());
 
@@ -167,14 +196,16 @@ public class MinerUAgentFactory
     private readonly IConfiguration _configuration;
     private readonly ILoggerFactory _loggerFactory;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly System.Text.Json.JsonSerializerOptions _jsonSerializerOptions;
     private readonly OpenAIClient _openAiClient;
 
-    public MinerUAgentFactory(IConfiguration configuration, ILoggerFactory loggerFactory, IHttpClientFactory httpClientFactory, System.Text.Json.JsonSerializerOptions jsonSerializerOptions)
+    public MinerUAgentFactory(IConfiguration configuration, ILoggerFactory loggerFactory, IHttpClientFactory httpClientFactory, IHttpContextAccessor httpContextAccessor, System.Text.Json.JsonSerializerOptions jsonSerializerOptions)
     {
         _configuration = configuration;
         _loggerFactory = loggerFactory;
         _httpClientFactory = httpClientFactory;
+        _httpContextAccessor = httpContextAccessor;
         _jsonSerializerOptions = jsonSerializerOptions;
 
         var githubToken = _configuration["GitHubToken"]
@@ -200,11 +231,9 @@ public class MinerUAgentFactory
             name: "MinerUAgent",
             description: "A document-processing assistant. When the user uploads a file, it is parsed by MinerU and the extracted content is used to answer questions.");
 
-        var minerUBaseUrl = _configuration["MinerUUrl"]
-            ?? Environment.GetEnvironmentVariable("MINERÚ_URL")
-            ?? "http://localhost:8090";
+        var minerUService = new MinerUCloudService(_httpClientFactory, logger);
 
-        return new MinerUAgent(chatClientAgent, _httpClientFactory, minerUBaseUrl, logger);
+        return new MinerUAgent(chatClientAgent, minerUService, _httpContextAccessor, logger);
     }
 }
 

@@ -1,22 +1,25 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.Agents.AI;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.AI;
 
 [SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "Instantiated by MinerUAgentFactory")]
 internal sealed class MinerUAgent : DelegatingAIAgent
 {
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly string _minerUBaseUrl;
+    private readonly MinerUCloudService _minerUService;
+    private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ILogger _logger;
 
-    public MinerUAgent(AIAgent innerAgent, IHttpClientFactory httpClientFactory, string minerUBaseUrl, ILogger logger)
+    public MinerUAgent(
+        AIAgent innerAgent,
+        MinerUCloudService minerUService,
+        IHttpContextAccessor httpContextAccessor,
+        ILogger logger)
         : base(innerAgent)
     {
-        _httpClientFactory = httpClientFactory;
-        _minerUBaseUrl = minerUBaseUrl;
+        _minerUService = minerUService;
+        _httpContextAccessor = httpContextAccessor;
         _logger = logger;
     }
 
@@ -45,34 +48,41 @@ internal sealed class MinerUAgent : DelegatingAIAgent
 
     private async Task<IEnumerable<ChatMessage>> EnrichWithMinerUAsync(List<ChatMessage> messages, CancellationToken cancellationToken)
     {
-        var lastUserMessage = messages.LastOrDefault(m => m.Role == ChatRole.User);
-        if (lastUserMessage is null) return messages;
+        // Files extracted by FileAttachmentMiddleware from array-content messages
+        var middlewareFiles = _httpContextAccessor.HttpContext?.Items["__attachments__"] as List<ExtractedFile> ?? [];
 
-        var files = lastUserMessage.Contents
+        // Also check native DataContent in messages (future-proofing)
+        var lastUserMessage = messages.LastOrDefault(m => m.Role == ChatRole.User);
+        var dataContentFiles = lastUserMessage?.Contents
             .OfType<DataContent>()
             .Where(d => IsDocumentType(d.MediaType))
+            .Select(d => new ExtractedFile(ExtractBytes(d), d.MediaType ?? "application/octet-stream"))
+            ?? [];
+
+        var allFiles = middlewareFiles
+            .Concat(dataContentFiles)
+            .Where(f => f.Bytes.Length > 0 && IsDocumentType(f.MediaType))
             .ToList();
 
-        if (files.Count == 0) return messages;
+        if (allFiles.Count == 0) return messages;
 
         var parsed = new List<string>();
-        foreach (var file in files)
+        foreach (var file in allFiles)
         {
             _logger.LogInformation("📄 Sending file to MinerU: {MediaType}", file.MediaType);
-            var result = await ParseWithMinerUAsync(file, cancellationToken);
+            var result = await ParseWithMinerUAsync(file.Bytes, file.MediaType, cancellationToken);
             if (result is not null)
                 parsed.Add(result);
         }
 
         if (parsed.Count == 0) return messages;
 
-        var extractedContent = string.Join("\n\n---\n\n", parsed);
         var systemMessage = new ChatMessage(
             ChatRole.System,
             $"""
             The user has uploaded file(s). MinerU has extracted the following content:
 
-            {extractedContent}
+            {string.Join("\n\n---\n\n", parsed)}
 
             Use this extracted content to answer the user's request.
             """);
@@ -80,26 +90,12 @@ internal sealed class MinerUAgent : DelegatingAIAgent
         return messages.Prepend(systemMessage);
     }
 
-    private async Task<string?> ParseWithMinerUAsync(DataContent fileContent, CancellationToken cancellationToken)
+    private async Task<string?> ParseWithMinerUAsync(byte[] bytes, string mediaType, CancellationToken cancellationToken)
     {
         try
         {
-            byte[] bytes = ExtractBytes(fileContent);
-            if (bytes.Length == 0) return null;
-
-            using var client = _httpClientFactory.CreateClient("MinerU");
-            using var form = new MultipartFormDataContent();
-            var fileBytes = new ByteArrayContent(bytes);
-            fileBytes.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(
-                fileContent.MediaType ?? "application/octet-stream");
-            form.Add(fileBytes, "file", "upload");
-
-            var response = await client.PostAsync($"{_minerUBaseUrl}/api/v1/extract", form, cancellationToken);
-            response.EnsureSuccessStatusCode();
-
-            var json = await response.Content.ReadAsStringAsync(cancellationToken);
-            var result = JsonSerializer.Deserialize<MinerUResponse>(json);
-            return result?.Markdown ?? result?.Content;
+            var fileName = GuessFileName(mediaType);
+            return await _minerUService.ParseAsync(bytes, fileName, mediaType, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -107,6 +103,18 @@ internal sealed class MinerUAgent : DelegatingAIAgent
             return $"[MinerU parsing failed: {ex.Message}]";
         }
     }
+
+    private static string GuessFileName(string mediaType) => mediaType switch
+    {
+        "application/pdf" => "document.pdf",
+        "image/png" => "image.png",
+        "image/jpeg" or "image/jpg" => "image.jpg",
+        "image/webp" => "image.webp",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => "document.docx",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => "document.pptx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => "document.xlsx",
+        _ => "document"
+    };
 
     private static byte[] ExtractBytes(DataContent content)
     {
@@ -129,14 +137,7 @@ internal sealed class MinerUAgent : DelegatingAIAgent
          mediaType.Contains("word") ||
          mediaType.Contains("document") ||
          mediaType.Contains("image") ||
-         mediaType.Contains("text/plain"));
-}
-
-internal sealed class MinerUResponse
-{
-    [JsonPropertyName("markdown")]
-    public string? Markdown { get; set; }
-
-    [JsonPropertyName("content")]
-    public string? Content { get; set; }
+         mediaType.Contains("text/plain") ||
+         mediaType.Contains("presentationml") ||
+         mediaType.Contains("spreadsheetml"));
 }

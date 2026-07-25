@@ -13,6 +13,7 @@ import {
 } from "@copilotkit/react-core/v2";
 import { useEffect, useState } from "react";
 import { z } from "zod";
+import Link from "next/link";
 import type { AgentState } from "@/lib/types";
 
 import styles from "./page.module.css";
@@ -130,6 +131,12 @@ function YourMainContent({ themeColor }: { themeColor: string }) {
       className="h-screen flex justify-center items-center flex-col transition-colors duration-300"
     >
       <ProverbsCard state={state} setState={setState} />
+      <Link
+        href="/mineru"
+        className="mt-6 px-4 py-2 rounded-lg bg-white/20 hover:bg-white/30 text-white text-sm font-medium transition-colors"
+      >
+        📄 Open MinerU Document Assistant
+      </Link>
     </div>
   );
 }
