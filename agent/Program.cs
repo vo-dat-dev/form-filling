@@ -242,12 +242,16 @@ public class MinerUAgentFactory
         var useStandard = string.Equals(
             Environment.GetEnvironmentVariable("MINERU_USE_STANDARD") ?? _configuration["MINERU_USE_STANDARD"],
             "true", StringComparison.OrdinalIgnoreCase);
+        var nextjsBaseUrl = Environment.GetEnvironmentVariable("NEXTJS_URL")
+            ?? _configuration["NEXTJS_URL"]
+            ?? "http://localhost:3000";
 
         logger.LogInformation("MinerU mode: {Mode}", useStandard ? "standard" : "agent (lightweight)");
+        logger.LogInformation("Next.js URL: {Url}", nextjsBaseUrl);
 
         var minerUService = new MinerUCloudService(_httpClientFactory, logger, apiKey, useStandard);
 
-        return new MinerUAgent(chatClientAgent, minerUService, _httpContextAccessor, logger);
+        return new MinerUAgent(chatClientAgent, minerUService, _httpContextAccessor, logger, chatClient, _httpClientFactory, nextjsBaseUrl);
     }
 }
 

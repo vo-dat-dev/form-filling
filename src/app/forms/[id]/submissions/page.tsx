@@ -143,7 +143,10 @@ export default function SubmissionsPage({
                 {submissions.map((s, idx) => (
                   <tr
                     key={s.id}
-                    className="border-b border-slate-100 hover:bg-slate-50"
+                    className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer"
+                    onClick={() =>
+                      (window.location.href = `/forms/${form.id}/submissions/${s.id}`)
+                    }
                   >
                     <td className="py-2 px-3 text-slate-400">{idx + 1}</td>
                     {form.fields.map((f) => (
