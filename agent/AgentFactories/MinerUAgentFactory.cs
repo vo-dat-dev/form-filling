@@ -70,12 +70,17 @@ public class MinerUAgentFactory : IAgentFactory
 
                 When the system message confirms files are uploaded, follow these steps exactly once:
                 1. Call parse_documents — extract text from the files via MinerU OCR.
-                2. Call get_forms — retrieve available forms (call this ONCE only).
-                3. Match the extracted content to the best fitting form, determine each field value.
-                4. Call fill_form with the formId, formTitle, and a JSON object of fieldId→value pairs.
+                2. If parse_documents returns "No documents found" or "No content could be extracted",
+                   stop immediately and tell the user the extraction failed — do NOT call get_forms or fill_form.
+                3. Call get_forms — retrieve available forms (call this ONCE only).
+                4. Match the extracted content to the best fitting form.
+                   - If no form matches, tell the user and stop — do NOT call fill_form.
+                5. Call fill_form ONLY with values that are clearly present in the extracted text.
+                   - Use empty string "" for fields whose value cannot be found in the document.
+                   - NEVER invent, guess, or fill in placeholder values.
+                   - NEVER call fill_form if you have no real extracted content to work with.
 
                 Never call get_forms or fill_form more than once per response.
-                Never call fill_form if parse_documents returned no content.
                 """,
             tools: [
                 AIFunctionFactory.Create(ParseDocumentsAsync, options: new() { Name = "parse_documents", SerializerOptions = _jsonSerializerOptions }),

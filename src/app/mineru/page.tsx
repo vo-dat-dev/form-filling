@@ -81,31 +81,60 @@ function MinerUToolCallCard({
   name,
   status,
   args,
+  result,
 }: {
   name: string;
   status: ToolStatus;
   args?: Record<string, unknown>;
+  result?: unknown;
 }) {
+  if (name === "get_forms") return null;
+
   const meta = TOOL_META[name];
   const isRunning = status === "inProgress" || status === "executing";
 
+  const ocrSummary =
+    status === "complete" &&
+    name === "parse_documents" &&
+    typeof result === "string" &&
+    result.trim().length > 0 &&
+    !result.startsWith("No ")
+      ? result.replace(/\s+/g, " ").trim().slice(0, 160) +
+        (result.length > 160 ? "…" : "")
+      : null;
+
+  const formTitle =
+    name === "fill_form" && !!args?.formTitle
+      ? String(args.formTitle)
+      : null;
+
   return (
-    <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-slate-100 text-sm text-slate-700 my-1">
-      <span className={isRunning ? "text-indigo-500" : "text-emerald-500"}>
-        {isRunning ? (
-          <Loader2 className="w-4 h-4 animate-spin" />
-        ) : (
-          meta?.icon ?? <CheckCircle className="w-4 h-4" />
-        )}
-      </span>
-      <span className="flex-1">{meta?.label ?? name}</span>
-      {status === "complete" && name === "fill_form" && !!args?.formTitle && (
-        <span className="text-xs text-slate-400 truncate max-w-[120px]">
-          {String(args.formTitle)}
+    <div className="rounded-lg bg-slate-100 text-sm text-slate-700 my-1 overflow-hidden">
+      <div className="flex items-center gap-2.5 px-3 py-2">
+        <span className={isRunning ? "text-indigo-500" : "text-emerald-500"}>
+          {isRunning ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            meta?.icon ?? <CheckCircle className="w-4 h-4" />
+          )}
         </span>
+        <span className="flex-1">{meta?.label ?? name}</span>
+        {isRunning && (
+          <span className="text-xs text-indigo-400">running…</span>
+        )}
+      </div>
+      {ocrSummary && (
+        <div className="px-3 pb-2.5 border-t border-slate-200 pt-2">
+          <p className="text-xs text-slate-500 leading-relaxed">{ocrSummary}</p>
+        </div>
       )}
-      {isRunning && (
-        <span className="text-xs text-indigo-400">running…</span>
+      {status === "complete" && formTitle && (
+        <div className="px-3 pb-2.5 border-t border-slate-200 pt-2">
+          <p className="text-xs text-slate-500">
+            Matched form:{" "}
+            <span className="font-medium text-slate-700">{formTitle}</span>
+          </p>
+        </div>
       )}
     </div>
   );
@@ -118,11 +147,12 @@ function MinerUContent() {
     {
       name: "*",
       agentId: "minerU",
-      render: ({ name, args, status }) => (
+      render: ({ name, args, status, result }) => (
         <MinerUToolCallCard
           name={name}
           status={status as ToolStatus}
           args={args as Record<string, unknown>}
+          result={result}
         />
       ),
     },
