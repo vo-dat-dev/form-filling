@@ -205,6 +205,9 @@ public class MinerUAgentFactory
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly System.Text.Json.JsonSerializerOptions _jsonSerializerOptions;
     private readonly OpenAIClient _openAiClient;
+    private readonly ILogger _logger;
+    private readonly string _nextjsBaseUrl;
+    private readonly MinerUCloudService _minerUService;
 
     public MinerUAgentFactory(IConfiguration configuration, ILoggerFactory loggerFactory, IHttpClientFactory httpClientFactory, IHttpContextAccessor httpContextAccessor, System.Text.Json.JsonSerializerOptions jsonSerializerOptions)
     {
@@ -213,6 +216,7 @@ public class MinerUAgentFactory
         _httpClientFactory = httpClientFactory;
         _httpContextAccessor = httpContextAccessor;
         _jsonSerializerOptions = jsonSerializerOptions;
+        _logger = loggerFactory.CreateLogger<MinerUAgentFactory>();
 
         var githubToken = _configuration["GitHubToken"]
             ?? throw new InvalidOperationException(
@@ -225,34 +229,151 @@ public class MinerUAgentFactory
             {
                 Endpoint = new Uri(Environment.GetEnvironmentVariable("OPENAI_BASE_URL") ?? "https://models.inference.ai.azure.com")
             });
+
+        var apiKey = Environment.GetEnvironmentVariable("MINERU_API_KEY") ?? _configuration["MINERU_API_KEY"];
+        var useStandard = string.Equals(
+            Environment.GetEnvironmentVariable("MINERU_USE_STANDARD") ?? _configuration["MINERU_USE_STANDARD"],
+            "true", StringComparison.OrdinalIgnoreCase);
+        _nextjsBaseUrl = Environment.GetEnvironmentVariable("NEXTJS_URL") ?? _configuration["NEXTJS_URL"] ?? "http://localhost:3000";
+
+        _logger.LogInformation("MinerU mode: {Mode}", useStandard ? "standard" : "agent (lightweight)");
+        _logger.LogInformation("Next.js URL: {Url}", _nextjsBaseUrl);
+
+        _minerUService = new MinerUCloudService(_httpClientFactory, _logger, apiKey, useStandard);
     }
 
     public AIAgent CreateMinerUAgent()
     {
         var chatClient = _openAiClient.GetChatClient("gpt-4o-mini").AsIChatClient();
-        var logger = _loggerFactory.CreateLogger<MinerUAgentFactory>();
 
         var chatClientAgent = new ChatClientAgent(
             chatClient,
             name: "MinerUAgent",
-            description: "A document-processing assistant. When the user uploads a file, it is parsed by MinerU and the extracted content is used to answer questions.");
+            description: """
+                A document-processing assistant.
 
-        var apiKey = Environment.GetEnvironmentVariable("MINERU_API_KEY")
-            ?? _configuration["MINERU_API_KEY"];
-        var useStandard = string.Equals(
-            Environment.GetEnvironmentVariable("MINERU_USE_STANDARD") ?? _configuration["MINERU_USE_STANDARD"],
-            "true", StringComparison.OrdinalIgnoreCase);
-        var nextjsBaseUrl = Environment.GetEnvironmentVariable("NEXTJS_URL")
-            ?? _configuration["NEXTJS_URL"]
-            ?? "http://localhost:3000";
+                ONLY act on document uploads — do NOT call any tool unless the system message
+                explicitly says "The user has uploaded X file(s)".
 
-        logger.LogInformation("MinerU mode: {Mode}", useStandard ? "standard" : "agent (lightweight)");
-        logger.LogInformation("Next.js URL: {Url}", nextjsBaseUrl);
+                When the system message confirms files are uploaded, follow these steps exactly once:
+                1. Call parse_documents — extract text from the files via MinerU OCR.
+                2. Call get_forms — retrieve available forms (call this ONCE only).
+                3. Match the extracted content to the best fitting form, determine each field value.
+                4. Call fill_form with the formId, formTitle, and a JSON object of fieldId→value pairs.
 
-        var minerUService = new MinerUCloudService(_httpClientFactory, logger, apiKey, useStandard);
+                Never call get_forms or fill_form more than once per response.
+                Never call fill_form if parse_documents returned no content.
+                """,
+            tools: [
+                AIFunctionFactory.Create(ParseDocumentsAsync, options: new() { Name = "parse_documents", SerializerOptions = _jsonSerializerOptions }),
+                AIFunctionFactory.Create(GetFormsAsync, options: new() { Name = "get_forms", SerializerOptions = _jsonSerializerOptions }),
+                AIFunctionFactory.Create(FillFormAsync, options: new() { Name = "fill_form", SerializerOptions = _jsonSerializerOptions }),
+            ]);
 
-        return new MinerUAgent(chatClientAgent, minerUService, _httpContextAccessor, logger, chatClient, _httpClientFactory, nextjsBaseUrl);
+        return new MinerUAgent(chatClientAgent, _httpContextAccessor, _logger);
     }
+
+    // =================
+    // Tools
+    // =================
+
+    [Description("Parse the uploaded documents using MinerU OCR and return the extracted text content.")]
+    private async Task<string> ParseDocumentsAsync(CancellationToken cancellationToken = default)
+    {
+        var files = _httpContextAccessor.HttpContext?.Items["__attachments__"] as List<ExtractedFile> ?? [];
+        var docFiles = files.Where(f => f.Bytes.Length > 0).ToList();
+
+        if (docFiles.Count == 0)
+            return "No documents found to parse.";
+
+        var parsed = new List<string>();
+        foreach (var file in docFiles)
+        {
+            _logger.LogInformation("Parsing file with MinerU: {MediaType}", file.MediaType);
+            try
+            {
+                var fileName = GuessFileName(file.MediaType);
+                var result = await _minerUService.ParseAsync(file.Bytes, fileName, file.MediaType, cancellationToken);
+                if (result is not null)
+                    parsed.Add(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "MinerU parsing failed for {MediaType}", file.MediaType);
+                parsed.Add($"[Parsing failed: {ex.Message}]");
+            }
+        }
+
+        return parsed.Count > 0
+            ? string.Join("\n\n---\n\n", parsed)
+            : "No content could be extracted from the documents.";
+    }
+
+    [Description("Get all available forms from the system. Call this ONCE per response after parse_documents has returned content.")]
+    private async Task<List<FormDto>> GetFormsAsync(CancellationToken cancellationToken = default)
+    {
+        // Guard: prevent the LLM from calling this more than once per HTTP request
+        if (_httpContextAccessor.HttpContext is { } ctx)
+        {
+            if (ctx.Items.ContainsKey("__forms_fetched__"))
+            {
+                _logger.LogWarning("get_forms called more than once — returning cached result");
+                return ctx.Items["__forms_cache__"] as List<FormDto> ?? [];
+            }
+            ctx.Items["__forms_fetched__"] = true;
+        }
+
+        try
+        {
+            using var client = _httpClientFactory.CreateClient();
+            var json = await client.GetStringAsync($"{_nextjsBaseUrl}/api/forms", cancellationToken);
+            var forms = System.Text.Json.JsonSerializer.Deserialize<List<FormDto>>(json) ?? [];
+            if (_httpContextAccessor.HttpContext is { } c)
+                c.Items["__forms_cache__"] = forms;
+            return forms;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to fetch forms from {Url}", _nextjsBaseUrl);
+            return [];
+        }
+    }
+
+    [Description("Register the matched form fill result so it can be displayed to the user. Call this after parse_documents and get_forms, exactly once.")]
+    private Task<string> FillFormAsync(
+        [Description("The ID of the best matching form")] string formId,
+        [Description("The display title of the matched form")] string formTitle,
+        [Description("JSON object mapping each fieldId to its extracted value, e.g. {\"field1\": \"value1\"}")] System.Text.Json.JsonElement filledValues,
+        CancellationToken cancellationToken = default)
+    {
+        if (_httpContextAccessor.HttpContext is { } ctx)
+        {
+            var valueDict = filledValues.ValueKind == System.Text.Json.JsonValueKind.Object
+                ? filledValues.EnumerateObject().ToDictionary(p => p.Name, p => p.Value)
+                : new Dictionary<string, System.Text.Json.JsonElement>();
+
+            ctx.Items["__form_fill__"] = new MinerUFormFill
+            {
+                FormId = formId,
+                FormTitle = formTitle,
+                FilledValues = valueDict
+            };
+            _logger.LogInformation("fill_form registered: formId={FormId}", formId);
+        }
+        return Task.FromResult($"Form fill registered for '{formTitle}'.");
+    }
+
+    private static string GuessFileName(string mediaType) => mediaType switch
+    {
+        "application/pdf" => "document.pdf",
+        "image/png" => "image.png",
+        "image/jpeg" or "image/jpg" => "image.jpg",
+        "image/webp" => "image.webp",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => "document.docx",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => "document.pptx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => "document.xlsx",
+        _ => "document"
+    };
 }
 
 // =================
@@ -260,4 +381,6 @@ public class MinerUAgentFactory
 // =================
 [JsonSerializable(typeof(ProverbsStateSnapshot))]
 [JsonSerializable(typeof(WeatherInfo))]
+[JsonSerializable(typeof(List<FormDto>))]
+[JsonSerializable(typeof(FormDto))]
 internal sealed partial class ProverbsAgentSerializerContext : JsonSerializerContext;

@@ -9,29 +9,17 @@ using Microsoft.Extensions.AI;
 [SuppressMessage("Performance", "CA1812", Justification = "Instantiated by MinerUAgentFactory")]
 internal sealed class MinerUAgent : DelegatingAIAgent
 {
-    private readonly MinerUCloudService _minerUService;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ILogger _logger;
-    private readonly IChatClient _chatClient;
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly string _nextjsBaseUrl;
 
     public MinerUAgent(
         AIAgent innerAgent,
-        MinerUCloudService minerUService,
         IHttpContextAccessor httpContextAccessor,
-        ILogger logger,
-        IChatClient chatClient,
-        IHttpClientFactory httpClientFactory,
-        string nextjsBaseUrl)
+        ILogger logger)
         : base(innerAgent)
     {
-        _minerUService = minerUService;
         _httpContextAccessor = httpContextAccessor;
         _logger = logger;
-        _chatClient = chatClient;
-        _httpClientFactory = httpClientFactory;
-        _nextjsBaseUrl = nextjsBaseUrl;
     }
 
     public override Task<AgentRunResponse> RunAsync(
@@ -49,180 +37,60 @@ internal sealed class MinerUAgent : DelegatingAIAgent
         AgentRunOptions? options = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var (enriched, extractedContent) = await EnrichWithMinerUAsync(messages.ToList(), cancellationToken);
-
-        if (extractedContent is not null)
-        {
-            var formFill = await TryFillFormAsync(extractedContent, cancellationToken);
-            if (formFill is not null)
-            {
-                var stateBytes = JsonSerializer.SerializeToUtf8Bytes(formFill);
-                yield return new AgentRunResponseUpdate
-                {
-                    Contents = [new DataContent(stateBytes, "application/json")]
-                };
-                _logger.LogInformation("Emitted form fill state: formId={FormId}", formFill.FormId);
-            }
-        }
+        var enriched = PrepareMessages(messages.ToList());
 
         await foreach (var update in InnerAgent.RunStreamingAsync(enriched, thread, options, cancellationToken).ConfigureAwait(false))
             yield return update;
+
+        // If fill_form was called by the LLM, emit the state as DataContent so the frontend picks it up
+        if (_httpContextAccessor.HttpContext?.Items["__form_fill__"] is MinerUFormFill formFill)
+        {
+            var stateBytes = JsonSerializer.SerializeToUtf8Bytes(formFill);
+            yield return new AgentRunResponseUpdate
+            {
+                Contents = [new DataContent(stateBytes, "application/json")]
+            };
+            _logger.LogInformation("Emitted form fill state: formId={FormId}", formFill.FormId);
+            _httpContextAccessor.HttpContext.Items.Remove("__form_fill__");
+        }
     }
 
-    // ── Document extraction ────────────────────────────────────────────────────
+    // ── Message preparation ────────────────────────────────────────────────────
 
-    private async Task<(IEnumerable<ChatMessage> Messages, string? ExtractedContent)> EnrichWithMinerUAsync(
-        List<ChatMessage> messages, CancellationToken cancellationToken)
+    private IEnumerable<ChatMessage> PrepareMessages(List<ChatMessage> messages)
     {
-        var middlewareFiles = _httpContextAccessor.HttpContext?.Items["__attachments__"] as List<ExtractedFile> ?? [];
-
+        // Move any DataContent files from the last user message into HttpContext.Items
+        // so the parse_documents tool can access them.
         var lastUserMessage = messages.LastOrDefault(m => m.Role == ChatRole.User);
         var dataContentFiles = lastUserMessage?.Contents
             .OfType<DataContent>()
             .Where(d => IsDocumentType(d.MediaType))
             .Select(d => new ExtractedFile(ExtractBytes(d), d.MediaType ?? "application/octet-stream"))
-            ?? [];
+            .Where(f => f.Bytes.Length > 0)
+            .ToList() ?? [];
 
-        var allFiles = middlewareFiles
-            .Concat(dataContentFiles)
-            .Where(f => f.Bytes.Length > 0 && IsDocumentType(f.MediaType))
-            .ToList();
-
-        if (allFiles.Count == 0) return (messages, null);
-
-        var parsed = new List<string>();
-        foreach (var file in allFiles)
+        if (dataContentFiles.Count > 0 && _httpContextAccessor.HttpContext is { } ctx)
         {
-            _logger.LogInformation("Sending file to MinerU: {MediaType}", file.MediaType);
-            var result = await ParseWithMinerUAsync(file.Bytes, file.MediaType, cancellationToken);
-            if (result is not null)
-                parsed.Add(result);
+            var existing = ctx.Items["__attachments__"] as List<ExtractedFile> ?? [];
+            ctx.Items["__attachments__"] = existing.Concat(dataContentFiles).ToList();
+            _logger.LogInformation("Stored {Count} DataContent file(s) for parse_documents tool", dataContentFiles.Count);
         }
 
-        if (parsed.Count == 0) return (messages, null);
+        var totalFiles = ((_httpContextAccessor.HttpContext?.Items["__attachments__"] as List<ExtractedFile>) ?? []).Count;
+        if (totalFiles == 0)
+            return messages;
 
-        var extractedContent = string.Join("\n\n---\n\n", parsed);
+        _logger.LogInformation("{Count} file(s) ready for tool processing", totalFiles);
 
-        var systemMessage = new ChatMessage(
+        var hint = new ChatMessage(
             ChatRole.System,
-            $"""
-            The user has uploaded file(s). MinerU has extracted the following content:
+            $"The user has uploaded {totalFiles} file(s). Call the parse_documents tool to extract their content, " +
+            "then call get_forms to retrieve available forms and fill in the matching form fields.");
 
-            {extractedContent}
-
-            Use this extracted content to answer the user's request.
-            """);
-
-        return (messages.Prepend(systemMessage), extractedContent);
+        return messages.Prepend(hint);
     }
 
-    // ── Form matching & filling ────────────────────────────────────────────────
-
-    private async Task<MinerUFormFill?> TryFillFormAsync(string extractedContent, CancellationToken ct)
-    {
-        var forms = await FetchFormsAsync(ct);
-        if (forms.Count == 0)
-        {
-            _logger.LogInformation("No forms available, skipping form match");
-            return null;
-        }
-
-        _logger.LogInformation("Matching document against {Count} form(s)", forms.Count);
-
-        var formsJson = JsonSerializer.Serialize(forms);
-        var snippet = extractedContent.Length > 4000
-            ? extractedContent[..4000] + "\n... [truncated]"
-            : extractedContent;
-
-        var prompt = $$"""
-            You are a form-filling assistant. Given a document's extracted text and a list of available forms, your job is to:
-            1. Pick the form whose purpose best matches the document.
-            2. Extract the relevant value for each field from the document text.
-
-            Available forms (JSON):
-            {{formsJson}}
-
-            Extracted document content:
-            {{snippet}}
-
-            Respond ONLY with valid JSON — no markdown, no extra text:
-            {
-              "formId": "<id of the best matching form, or null if nothing fits>",
-              "formTitle": "<title of the matched form>",
-              "filledValues": {
-                "<fieldId>": "<extracted value>"
-              }
-            }
-
-            Rules:
-            - If no form is a reasonable match, set formId to null and filledValues to {}.
-            - For select/radio fields, use one of the available option values exactly.
-            - For checkbox fields, use an array of matching option values.
-            - For date fields, use ISO format YYYY-MM-DD.
-            - Use empty string "" for fields where no value is found.
-            """;
-
-        try
-        {
-            var response = await _chatClient.GetResponseAsync(
-                [new ChatMessage(ChatRole.User, prompt)],
-                new ChatOptions { ResponseFormat = ChatResponseFormat.Json },
-                ct);
-
-            _logger.LogInformation("Form fill LLM response: {Json}", response.Text);
-
-            var result = JsonSerializer.Deserialize<MinerUFormFill>(response.Text);
-            return result?.FormId is null ? null : result;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Form fill LLM call failed");
-            return null;
-        }
-    }
-
-    private async Task<List<FormDto>> FetchFormsAsync(CancellationToken ct)
-    {
-        try
-        {
-            using var client = _httpClientFactory.CreateClient();
-            var json = await client.GetStringAsync($"{_nextjsBaseUrl}/api/forms", ct);
-            return JsonSerializer.Deserialize<List<FormDto>>(json) ?? [];
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to fetch forms from {Url}", _nextjsBaseUrl);
-            return [];
-        }
-    }
-
-    // ── MinerU parsing ─────────────────────────────────────────────────────────
-
-    private async Task<string?> ParseWithMinerUAsync(byte[] bytes, string mediaType, CancellationToken ct)
-    {
-        try
-        {
-            var fileName = GuessFileName(mediaType);
-            return await _minerUService.ParseAsync(bytes, fileName, mediaType, ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "MinerU parsing failed");
-            return $"[MinerU parsing failed: {ex.Message}]";
-        }
-    }
-
-    private static string GuessFileName(string mediaType) => mediaType switch
-    {
-        "application/pdf" => "document.pdf",
-        "image/png" => "image.png",
-        "image/jpeg" or "image/jpg" => "image.jpg",
-        "image/webp" => "image.webp",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => "document.docx",
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => "document.pptx",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => "document.xlsx",
-        _ => "document"
-    };
+    // ── Helpers ────────────────────────────────────────────────────────────────
 
     private static byte[] ExtractBytes(DataContent content)
     {
