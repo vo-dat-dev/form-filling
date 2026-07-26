@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Plus, FileText, Trash2, Eye, Clock } from "lucide-react";
+import { Plus, FileText, Eye, Clock } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
 interface FormListItem {
   id: string;
@@ -12,6 +14,8 @@ interface FormListItem {
   updatedAt: string;
   _count: { submissions: number };
 }
+
+
 
 export default function FormsPage() {
   const [forms, setForms] = useState<FormListItem[]>([]);
@@ -56,90 +60,84 @@ export default function FormsPage() {
             href="/"
             className="text-sm text-slate-500 hover:text-slate-800 transition-colors"
           >
-            ← Home
+            Home
           </Link>
-          <Link
-            href="/forms/create"
-            className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            New Form
+          <Link href="/forms/create">
+            <Button>
+              <Plus className="w-4 h-4" />
+              New Form
+            </Button>
           </Link>
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-6 py-8">
+      <main className="px-6 py-8">
         {loading ? (
-          <div className="text-center text-slate-400 py-16">Loading...</div>
-        ) : forms.length === 0 ? (
-          <div className="text-center py-16">
-            <FileText className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-            <p className="text-slate-500 font-medium">No forms yet</p>
-            <p className="text-sm text-slate-400 mt-1">
-              Create your first dynamic form to get started.
-            </p>
-            <Link
-              href="/forms/create"
-              className="inline-flex items-center gap-1.5 mt-4 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              Create Form
-            </Link>
+          <div className="flex gap-4 overflow-x-auto pb-4">
+            {[1, 2, 3].map((i) => (
+              <Card key={i} className="animate-pulse shrink-0 w-72">
+                <CardContent className="p-5">
+                  <div className="h-5 bg-slate-200 rounded w-2/3 mb-3" />
+                  <div className="h-4 bg-slate-100 rounded w-full mb-2" />
+                  <div className="h-4 bg-slate-100 rounded w-1/2" />
+                </CardContent>
+              </Card>
+            ))}
           </div>
+        ) : forms.length === 0 ? (
+          <Card className="text-center py-16 max-w-md mx-auto">
+            <CardContent>
+              <FileText className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+              <p className="text-slate-500 font-medium">No forms yet</p>
+              <p className="text-sm text-slate-400 mt-1">
+                Create your first dynamic form to get started.
+              </p>
+              <Link href="/forms/create">
+                <Button className="mt-4">
+                  <Plus className="w-4 h-4" />
+                  Create Form
+                </Button>
+              </Link>
+            </CardContent>
+          </Card>
         ) : (
-          <div className="space-y-3">
+          <div className="flex gap-3 overflow-x-auto pb-4">
             {forms.map((form) => (
-              <div
-                key={form.id}
-                className="bg-white rounded-lg border border-slate-200 p-5 flex items-center justify-between hover:shadow-sm transition-shadow"
-              >
-                <div className="flex-1 min-w-0">
+              <Card key={form.id} className="shrink-0 w-64 hover:shadow-md transition-shadow">
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center">
+                      <FileText className="w-4 h-4 text-indigo-600" />
+                    </div>
+                    <Link href={`/forms/${form.id}/fill`}>
+                      <Button variant="ghost" size="icon" className="w-7 h-7 text-slate-400 hover:text-indigo-600">
+                        <Eye className="w-3.5 h-3.5" />
+                      </Button>
+                    </Link>
+                  </div>
                   <Link
                     href={`/forms/${form.id}/edit`}
-                    className="text-base font-medium text-slate-800 hover:text-indigo-600 transition-colors"
+                    className="text-sm font-semibold text-slate-800 hover:text-indigo-600 transition-colors line-clamp-1"
                   >
                     {form.title}
                   </Link>
                   {form.description && (
-                    <p className="text-sm text-slate-500 mt-0.5 truncate">
+                    <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">
                       {form.description}
                     </p>
                   )}
-                  <div className="flex items-center gap-4 mt-2 text-xs text-slate-400">
+                  <div className="flex items-center gap-3 mt-3 text-xs text-slate-400">
                     <span className="flex items-center gap-1">
-                      <FileText className="w-3.5 h-3.5" />
-                      {form._count.submissions} submissions
+                      <FileText className="w-3 h-3" />
+                      {form._count.submissions}
                     </span>
                     <span className="flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5" />
+                      <Clock className="w-3 h-3" />
                       {new Date(form.updatedAt).toLocaleDateString()}
                     </span>
                   </div>
-                </div>
-                <div className="flex items-center gap-2 ml-4">
-                  <Link
-                    href={`/forms/${form.id}/fill`}
-                    className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                    title="Fill form"
-                  >
-                    <Eye className="w-4 h-4" />
-                  </Link>
-                  <Link
-                    href={`/forms/${form.id}/submissions`}
-                    className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors text-xs"
-                    title="View submissions"
-                  >
-                    Data
-                  </Link>
-                  <button
-                    onClick={() => deleteForm(form.id)}
-                    className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                    title="Delete form"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
+                </CardContent>
+              </Card>
             ))}
           </div>
         )}
