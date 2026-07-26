@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Plus, FileText, Eye, Clock } from "lucide-react";
+import { Plus, FileText, Eye, Clock, Inbox } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
@@ -109,11 +109,18 @@ export default function FormsPage() {
                     <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center">
                       <FileText className="w-4 h-4 text-indigo-600" />
                     </div>
-                    <Link href={`/forms/${form.id}/fill`}>
-                      <Button variant="ghost" size="icon" className="w-7 h-7 text-slate-400 hover:text-indigo-600">
-                        <Eye className="w-3.5 h-3.5" />
-                      </Button>
-                    </Link>
+                    <div className="flex items-center gap-0.5">
+                      <Link href={`/forms/${form.id}/submissions`}>
+                        <Button variant="ghost" size="icon" className="w-7 h-7 text-slate-400 hover:text-indigo-600" title="View submissions">
+                          <Inbox className="w-3.5 h-3.5" />
+                        </Button>
+                      </Link>
+                      <Link href={`/forms/${form.id}/fill`}>
+                        <Button variant="ghost" size="icon" className="w-7 h-7 text-slate-400 hover:text-indigo-600" title="Fill form">
+                          <Eye className="w-3.5 h-3.5" />
+                        </Button>
+                      </Link>
+                    </div>
                   </div>
                   <Link
                     href={`/forms/${form.id}/edit`}
@@ -127,10 +134,13 @@ export default function FormsPage() {
                     </p>
                   )}
                   <div className="flex items-center gap-3 mt-3 text-xs text-slate-400">
-                    <span className="flex items-center gap-1">
-                      <FileText className="w-3 h-3" />
-                      {form._count.submissions}
-                    </span>
+                    <Link
+                      href={`/forms/${form.id}/submissions`}
+                      className="flex items-center gap-1 hover:text-indigo-600 transition-colors"
+                    >
+                      <Inbox className="w-3 h-3" />
+                      {form._count.submissions} submissions
+                    </Link>
                     <span className="flex items-center gap-1">
                       <Clock className="w-3 h-3" />
                       {new Date(form.updatedAt).toLocaleDateString()}

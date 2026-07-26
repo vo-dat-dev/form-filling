@@ -3,11 +3,12 @@
 import {
   CopilotChatConfigurationProvider,
   CopilotSidebar,
+  useRenderTool,
 } from "@copilotkit/react-core/v2";
 import { useCoAgent } from "@copilotkit/react-core";
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { CheckCircle } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { CheckCircle, FileSearch, ClipboardList, PenLine, Loader2 } from "lucide-react";
 import type { FormField } from "@/lib/types";
 
 interface MinerUState {
@@ -59,8 +60,74 @@ export default function MinerUPage() {
   );
 }
 
+type ToolStatus = "inProgress" | "executing" | "complete";
+
+const TOOL_META: Record<string, { label: string; icon: ReactNode }> = {
+  parse_documents: {
+    label: "Extracting document content",
+    icon: <FileSearch className="w-4 h-4" />,
+  },
+  get_forms: {
+    label: "Fetching available forms",
+    icon: <ClipboardList className="w-4 h-4" />,
+  },
+  fill_form: {
+    label: "Matching & filling form fields",
+    icon: <PenLine className="w-4 h-4" />,
+  },
+};
+
+function MinerUToolCallCard({
+  name,
+  status,
+  args,
+}: {
+  name: string;
+  status: ToolStatus;
+  args?: Record<string, unknown>;
+}) {
+  const meta = TOOL_META[name];
+  const isRunning = status === "inProgress" || status === "executing";
+
+  return (
+    <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-slate-100 text-sm text-slate-700 my-1">
+      <span className={isRunning ? "text-indigo-500" : "text-emerald-500"}>
+        {isRunning ? (
+          <Loader2 className="w-4 h-4 animate-spin" />
+        ) : (
+          meta?.icon ?? <CheckCircle className="w-4 h-4" />
+        )}
+      </span>
+      <span className="flex-1">{meta?.label ?? name}</span>
+      {status === "complete" && name === "fill_form" && !!args?.formTitle && (
+        <span className="text-xs text-slate-400 truncate max-w-[120px]">
+          {String(args.formTitle)}
+        </span>
+      )}
+      {isRunning && (
+        <span className="text-xs text-indigo-400">running…</span>
+      )}
+    </div>
+  );
+}
+
 function MinerUContent() {
   const { state } = useCoAgent<MinerUState>({ name: "minerU" });
+
+  useRenderTool(
+    {
+      name: "*",
+      agentId: "minerU",
+      render: ({ name, args, status }) => (
+        <MinerUToolCallCard
+          name={name}
+          status={status as ToolStatus}
+          args={args as Record<string, unknown>}
+        />
+      ),
+    },
+    [],
+  );
   const [form, setForm] = useState<FormData | null>(null);
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [submitted, setSubmitted] = useState(false);
