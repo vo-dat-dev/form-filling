@@ -76,7 +76,13 @@ public class MinerUAgentFactory : IAgentFactory
                 4. Match the extracted content to the best fitting form.
                    - If no form matches, tell the user and stop — do NOT call fill_form.
                 5. Call fill_form ONLY with values that are clearly present in the extracted text.
-                   - Use empty string "" for fields whose value cannot be found in the document.
+                   - For "text", "number", "email", "tel", "textarea", "select", "radio", "date" fields: use the string value directly.
+                   - For "checkbox" fields: use an array of selected option values, or empty array [].
+                   - For "list" fields (repeating group): use an array of objects. Each object maps the sub-field IDs to their values. Example:
+                     If a list field "Experience" has subFields [{id:"sf_1",type:"text",label:"Company"},{id:"sf_2",type:"text",label:"Role"}],
+                     the value should be: [{"sf_1":"Vietbank","sf_2":"Developer"},{"sf_1":"VNPT","sf_2":"Manager"}]
+                   - Use empty string "" for simple fields whose value cannot be found.
+                   - Use empty array [] for list/checkbox fields whose value cannot be found.
                    - NEVER invent, guess, or fill in placeholder values.
                    - NEVER call fill_form if you have no real extracted content to work with.
 
@@ -159,7 +165,7 @@ public class MinerUAgentFactory : IAgentFactory
     private Task<string> FillFormAsync(
         [Description("The ID of the best matching form")] string formId,
         [Description("The display title of the matched form")] string formTitle,
-        [Description("JSON object mapping each fieldId to its extracted value, e.g. {\"field1\": \"value1\"}")] JsonElement filledValues,
+        [Description("JSON object mapping each fieldId to its extracted value. For \"list\" fields (repeating group), the value must be an array of objects where each object maps sub-field IDs to their values; use [] if empty. For \"checkbox\" fields, use an array of strings; use [] if empty. For all other field types, use a string value. Example: {\"field_1\":\"John\", \"field_2\":[{\"sf_a\":\"Vietbank\",\"sf_b\":\"2020\"},{\"sf_a\":\"VNPT\",\"sf_b\":\"2022\"}], \"field_3\":[\"opt1\",\"opt2\"]}")] JsonElement filledValues,
         CancellationToken cancellationToken = default)
     {
         if (_httpContextAccessor.HttpContext is { } ctx)
