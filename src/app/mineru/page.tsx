@@ -8,7 +8,7 @@ import {
 import { useCoAgent } from "@copilotkit/react-core";
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
-import { CheckCircle, FileSearch, ClipboardList, PenLine, Loader2 } from "lucide-react";
+import { CheckCircle, FileSearch, ClipboardList, PenLine, Loader2, Plus, Trash2 } from "lucide-react";
 import type { FormField } from "@/lib/types";
 
 interface MinerUState {
@@ -177,7 +177,7 @@ function MinerUContent() {
         const initial: Record<string, unknown> = {};
         for (const f of data.fields) {
           const pre = state.filledValues?.[f.id];
-          initial[f.id] = pre ?? (f.type === "checkbox" ? [] : "");
+          initial[f.id] = pre ?? (f.type === "checkbox" || f.type === "list" ? [] : "");
         }
         setValues(initial);
         setSubmitted(false);
@@ -191,7 +191,7 @@ function MinerUContent() {
     for (const field of form?.fields ?? []) {
       if (field.required) {
         const val = values[field.id];
-        if (!val || (typeof val === "string" && !val.trim())) {
+        if (!val || (typeof val === "string" && !val.trim()) || (Array.isArray(val) && val.length === 0)) {
           errs[field.id] = `${field.label} is required`;
         }
       }
@@ -288,6 +288,77 @@ function MinerUContent() {
           </button>
         </form>
       </div>
+    </div>
+  );
+}
+
+function RepeatingListInput({
+  subFields,
+  value,
+  onChange,
+}: {
+  subFields: FormField[];
+  value: Record<string, unknown>[];
+  onChange: (val: unknown) => void;
+}) {
+  function addItem() {
+    const item: Record<string, unknown> = {};
+    subFields.forEach((sf) => {
+      if (sf.type === "checkbox") item[sf.id] = [];
+      else item[sf.id] = "";
+    });
+    onChange([...value, item]);
+  }
+
+  function removeItem(idx: number) {
+    onChange(value.filter((_, i) => i !== idx));
+  }
+
+  function updateItem(itemIdx: number, fieldId: string, val: unknown) {
+    onChange(
+      value.map((item, i) =>
+        i === itemIdx ? { ...item, [fieldId]: val } : item
+      )
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {value.map((item, itemIdx) => (
+        <div
+          key={itemIdx}
+          className="border border-slate-200 rounded-lg p-4 space-y-3"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-slate-500">
+              Item {itemIdx + 1}
+            </span>
+            <button
+              type="button"
+              onClick={() => removeItem(itemIdx)}
+              className="p-1 text-slate-300 hover:text-red-500"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+          {subFields.map((sf) => (
+            <FormFieldInput
+              key={sf.id}
+              field={sf}
+              value={item[sf.id]}
+              onChange={(val) => updateItem(itemIdx, sf.id, val)}
+            />
+          ))}
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={addItem}
+        className="flex items-center gap-2 px-3 py-2 text-sm text-indigo-600 border border-dashed border-indigo-300 rounded-lg hover:bg-indigo-50 transition-colors w-full justify-center"
+      >
+        <Plus className="w-4 h-4" />
+        Add Item
+      </button>
     </div>
   );
 }
@@ -395,6 +466,15 @@ function FormFieldInput({
             value={strVal}
             onChange={(e) => onChange(e.target.value)}
             className={inputClass}
+          />
+        );
+
+      case "list":
+        return (
+          <RepeatingListInput
+            subFields={field.subFields ?? []}
+            value={Array.isArray(value) ? (value as Record<string, unknown>[]) : []}
+            onChange={onChange}
           />
         );
 

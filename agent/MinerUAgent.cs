@@ -164,6 +164,9 @@ internal sealed class FormFieldDto
     [JsonPropertyName("options")]
     public List<FieldOptionDto>? Options { get; set; }
 
+    [JsonPropertyName("subFields")]
+    public List<FormFieldDto>? SubFields { get; set; }
+
     [JsonPropertyName("order")]
     public int Order { get; set; }
 }

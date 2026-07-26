@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Plus, FileText, Eye, Clock, Inbox } from "lucide-react";
+import { Plus, FileText, Eye, Clock, Inbox, Trash2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
@@ -120,6 +120,15 @@ export default function FormsPage() {
                           <Eye className="w-3.5 h-3.5" />
                         </Button>
                       </Link>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="w-7 h-7 text-slate-400 hover:text-red-500"
+                        title="Delete form"
+                        onClick={() => deleteForm(form.id)}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
                     </div>
                   </div>
                   <Link

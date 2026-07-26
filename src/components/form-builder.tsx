@@ -22,7 +22,16 @@ const FIELD_TYPES: { type: FieldType; label: string }[] = [
   { type: "radio", label: "Radio" },
   { type: "date", label: "Date" },
   { type: "file", label: "File Upload" },
+  { type: "list", label: "List" },
 ];
+
+const SUB_FIELD_TYPES = FIELD_TYPES.filter(
+  (ft) =>
+    ft.type !== "file" &&
+    ft.type !== "checkbox" &&
+    ft.type !== "radio" &&
+    ft.type !== "list"
+);
 
 interface FormBuilderProps {
   initial?: FormConfig;
@@ -48,6 +57,9 @@ function createField(type: FieldType): FormField {
       { label: "Option 1", value: "option_1" },
       { label: "Option 2", value: "option_2" },
     ];
+  }
+  if (type === "list") {
+    base.subFields = [];
   }
   return base;
 }
@@ -130,6 +142,58 @@ export function FormBuilder({ initial, onSave }: FormBuilderProps) {
         return {
           ...f,
           options: (f.options ?? []).filter((_, i) => i !== optIdx),
+        };
+      })
+    );
+  }
+
+  function addSubField(fieldId: string, type: FieldType) {
+    setFields((prev) =>
+      prev.map((f) => {
+        if (f.id !== fieldId) return f;
+        const subField: FormField = {
+          id: `sf_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          type,
+          label: "",
+          required: false,
+          order: (f.subFields ?? []).length,
+        };
+        if (type === "select") {
+          subField.options = [
+            { label: "Option 1", value: "option_1" },
+            { label: "Option 2", value: "option_2" },
+          ];
+        }
+        return { ...f, subFields: [...(f.subFields ?? []), subField] };
+      })
+    );
+  }
+
+  function updateSubField(
+    fieldId: string,
+    subId: string,
+    updates: Partial<FormField>
+  ) {
+    setFields((prev) =>
+      prev.map((f) => {
+        if (f.id !== fieldId) return f;
+        return {
+          ...f,
+          subFields: (f.subFields ?? []).map((sf) =>
+            sf.id === subId ? { ...sf, ...updates } : sf
+          ),
+        };
+      })
+    );
+  }
+
+  function removeSubField(fieldId: string, subId: string) {
+    setFields((prev) =>
+      prev.map((f) => {
+        if (f.id !== fieldId) return f;
+        return {
+          ...f,
+          subFields: (f.subFields ?? []).filter((sf) => sf.id !== subId),
         };
       })
     );
@@ -227,6 +291,11 @@ export function FormBuilder({ initial, onSave }: FormBuilderProps) {
               updateOption(field.id, idx, updates)
             }
             onRemoveOption={(idx) => removeOption(field.id, idx)}
+            onAddSubField={(type) => addSubField(field.id, type)}
+            onUpdateSubField={(subId, updates) =>
+              updateSubField(field.id, subId, updates)
+            }
+            onRemoveSubField={(subId) => removeSubField(field.id, subId)}
           />
         ))}
       </div>
@@ -254,6 +323,9 @@ interface FieldEditorProps {
   onAddOption: () => void;
   onUpdateOption: (idx: number, updates: Partial<FieldOption>) => void;
   onRemoveOption: (idx: number) => void;
+  onAddSubField?: (type: FieldType) => void;
+  onUpdateSubField?: (subId: string, updates: Partial<FormField>) => void;
+  onRemoveSubField?: (subId: string) => void;
 }
 
 function FieldEditor({
@@ -267,6 +339,9 @@ function FieldEditor({
   onAddOption,
   onUpdateOption,
   onRemoveOption,
+  onAddSubField,
+  onUpdateSubField,
+  onRemoveSubField,
 }: FieldEditorProps) {
   return (
     <div className="bg-white rounded-lg border border-slate-200 p-4">
@@ -421,6 +496,69 @@ function FieldEditor({
                 placeholder="Help text"
                 className="w-full px-2 py-1.5 border border-slate-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
               />
+            </div>
+          )}
+
+          {field.type === "list" && (
+            <div className="space-y-2">
+              <label className="block text-xs text-slate-500 mb-0.5">
+                Sub-Fields
+              </label>
+              {(field.subFields ?? []).map((sf) => (
+                <div
+                  key={sf.id}
+                  className="flex items-center gap-2 p-2 bg-slate-50 rounded border border-slate-100"
+                >
+                  <select
+                    value={sf.type}
+                    onChange={(e) =>
+                      onUpdateSubField?.(sf.id, {
+                        type: e.target.value as FieldType,
+                        options:
+                          e.target.value === "select"
+                            ? [
+                                { label: "Option 1", value: "option_1" },
+                                { label: "Option 2", value: "option_2" },
+                              ]
+                            : undefined,
+                      })
+                    }
+                    className="px-2 py-1 border border-slate-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
+                  >
+                    {SUB_FIELD_TYPES.map((sft) => (
+                      <option key={sft.type} value={sft.type}>
+                        {sft.label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    value={sf.label}
+                    onChange={(e) =>
+                      onUpdateSubField?.(sf.id, { label: e.target.value })
+                    }
+                    placeholder="Label"
+                    className="flex-1 px-2 py-1 border border-slate-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                  <button
+                    onClick={() => onRemoveSubField?.(sf.id)}
+                    className="p-1 text-slate-300 hover:text-red-500"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+              <div className="flex items-center gap-1 flex-wrap">
+                {SUB_FIELD_TYPES.map((sft) => (
+                  <button
+                    key={sft.type}
+                    onClick={() => onAddSubField?.(sft.type)}
+                    className="px-2 py-1 text-xs text-slate-600 bg-white border border-slate-200 rounded-md hover:bg-slate-50 hover:border-slate-300 transition-colors"
+                  >
+                    +{sft.label}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>
