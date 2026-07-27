@@ -85,7 +85,7 @@ internal sealed class MinerUAgent : DelegatingAIAgent
         var hint = new ChatMessage(
             ChatRole.System,
             $"The user has uploaded {totalFiles} file(s). Call the parse_documents tool to extract their content, " +
-            "then call get_forms to retrieve available forms and fill in the matching form fields.");
+            "then analyze the content and call search_forms to find the best matching form.");
 
         return messages.Prepend(hint);
     }
@@ -142,6 +142,12 @@ internal sealed class FormDto
 
     [JsonPropertyName("description")]
     public string? Description { get; set; }
+
+    [JsonPropertyName("embedding")]
+    public List<double>? Embedding { get; set; }
+
+    [JsonPropertyName("similarity")]
+    public double? Similarity { get; set; }
 
     [JsonPropertyName("fields")]
     public List<FormFieldDto>? Fields { get; set; }

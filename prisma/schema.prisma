@@ -11,6 +11,7 @@ model Form {
   id        String   @id @default(uuid())
   title     String
   description String?
+  embedding Unsupported("vector(1024)")?
   fields    Json
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

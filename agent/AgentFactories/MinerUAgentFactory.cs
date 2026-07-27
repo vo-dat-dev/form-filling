@@ -71,11 +71,14 @@ public class MinerUAgentFactory : IAgentFactory
                 When the system message confirms files are uploaded, follow these steps exactly once:
                 1. Call parse_documents — extract text from the files via MinerU OCR.
                 2. If parse_documents returns "No documents found" or "No content could be extracted",
-                   stop immediately and tell the user the extraction failed — do NOT call get_forms or fill_form.
-                3. Call get_forms — retrieve available forms (call this ONCE only).
-                4. Match the extracted content to the best fitting form.
-                   - If no form matches, tell the user and stop — do NOT call fill_form.
-                5. Call fill_form ONLY with values that are clearly present in the extracted text.
+                   stop immediately and tell the user the extraction failed — do NOT call search_forms or fill_form.
+                3. Analyze the extracted content. Identify what type of form is needed (e.g., "job application", "customer info", "survey", etc.).
+                   Formulate a concise search query describing the form type.
+                4. Call search_forms with that query — returns forms sorted by relevance with similarity score (call this ONCE only).
+                   - If results are empty or low similarity (< 0.5), try a different query once.
+                5. Match the extracted content to the best fitting form (highest similarity).
+                   - If no form matches well, tell the user and stop — do NOT call fill_form.
+                6. Call fill_form ONLY with values that are clearly present in the extracted text.
                    - For "text", "number", "email", "tel", "textarea", "select", "radio", "date" fields: use the string value directly.
                    - For "checkbox" fields: use an array of selected option values, or empty array [].
                    - For "list" fields (repeating group): use an array of objects. Each object maps the sub-field IDs to their values. Example:
@@ -86,11 +89,11 @@ public class MinerUAgentFactory : IAgentFactory
                    - NEVER invent, guess, or fill in placeholder values.
                    - NEVER call fill_form if you have no real extracted content to work with.
 
-                Never call get_forms or fill_form more than once per response.
+                Never call search_forms or fill_form more than once per response (unless search_forms returns low-similarity results, then you may retry once with a different query).
                 """,
             tools: [
                 AIFunctionFactory.Create(ParseDocumentsAsync, options: new() { Name = "parse_documents", SerializerOptions = _jsonSerializerOptions }),
-                AIFunctionFactory.Create(GetFormsAsync, options: new() { Name = "get_forms", SerializerOptions = _jsonSerializerOptions }),
+                AIFunctionFactory.Create(SearchFormsAsync, options: new() { Name = "search_forms", SerializerOptions = _jsonSerializerOptions }),
                 AIFunctionFactory.Create(FillFormAsync, options: new() { Name = "fill_form", SerializerOptions = _jsonSerializerOptions }),
             ]);
 
@@ -132,31 +135,35 @@ public class MinerUAgentFactory : IAgentFactory
             : "No content could be extracted from the documents.";
     }
 
-    [Description("Get all available forms from the system. Call this ONCE per response after parse_documents has returned content.")]
-    private async Task<List<FormDto>> GetFormsAsync(CancellationToken cancellationToken = default)
+    [Description("Search forms by semantic similarity. Analyze the parsed document, then call this with a query describing the form type needed. Returns forms sorted by relevance with a similarity score.")]
+    private async Task<List<FormDto>> SearchFormsAsync(
+        [Description("Search query describing the type of form needed, based on the document content")] string query,
+        CancellationToken cancellationToken = default)
     {
         if (_httpContextAccessor.HttpContext is { } ctx)
         {
-            if (ctx.Items.ContainsKey("__forms_fetched__"))
+            if (ctx.Items.ContainsKey("__forms_searched__"))
             {
-                _logger.LogWarning("get_forms called more than once — returning cached result");
+                _logger.LogWarning("search_forms called more than once — returning cached result");
                 return ctx.Items["__forms_cache__"] as List<FormDto> ?? [];
             }
-            ctx.Items["__forms_fetched__"] = true;
+            ctx.Items["__forms_searched__"] = true;
         }
 
         try
         {
             using var client = _httpClientFactory.CreateClient();
-            var json = await client.GetStringAsync($"{_nextjsBaseUrl}/api/forms", cancellationToken);
+            var encoded = Uri.EscapeDataString(query);
+            var json = await client.GetStringAsync($"{_nextjsBaseUrl}/api/forms?q={encoded}", cancellationToken);
             var forms = JsonSerializer.Deserialize<List<FormDto>>(json) ?? [];
+            _logger.LogInformation("search_forms returned {Count} results for query: {Query}", forms.Count, query);
             if (_httpContextAccessor.HttpContext is { } c)
                 c.Items["__forms_cache__"] = forms;
             return forms;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to fetch forms from {Url}", _nextjsBaseUrl);
+            _logger.LogWarning(ex, "Failed to search forms from {Url}", _nextjsBaseUrl);
             return [];
         }
     }
