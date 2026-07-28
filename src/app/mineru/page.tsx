@@ -316,7 +316,7 @@ function MinerUContent() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-2xl mx-auto px-6 py-8 space-y-6">
+      <div className="columns-1 sm:columns-2 xl:columns-3 gap-4 px-6 py-8 [&>*]:break-inside-avoid [&>*]:mb-4">
         {formsList.map((form) => {
           const formId = form.id;
           const values = formsValues[formId] ?? {};

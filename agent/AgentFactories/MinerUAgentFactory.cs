@@ -54,7 +54,7 @@ public class MinerUAgentFactory : IAgentFactory
 
     public AIAgent CreateAgent()
     {
-        var chatClient = _openAiClient.GetChatClient("gpt-4o").AsIChatClient();
+        var chatClient = _openAiClient.GetChatClient("gpt-4o-mini").AsIChatClient();
 
         var chatClientAgent = new ChatClientAgent(
             chatClient,
@@ -102,6 +102,12 @@ public class MinerUAgentFactory : IAgentFactory
     [Description("Parse the uploaded documents using MinerU OCR and return the extracted text content.")]
     private async Task<string> ParseDocumentsAsync(CancellationToken cancellationToken = default)
     {
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            _httpContextAccessor.HttpContext?.RequestAborted ?? CancellationToken.None);
+        var ct = linkedCts.Token;
+        ct.ThrowIfCancellationRequested();
+
         var files = _httpContextAccessor.HttpContext?.Items["__attachments__"] as List<ExtractedFile> ?? [];
         var docFiles = files.Where(f => f.Bytes.Length > 0).ToList();
 
@@ -114,7 +120,7 @@ public class MinerUAgentFactory : IAgentFactory
             _logger.LogInformation("Parsing file with {Strategy}: {MediaType}", _parserStrategy.GetType().Name, file.MediaType);
             try
             {
-                var result = await _parserStrategy.ParseAsync(file.Bytes, GuessFileName(file.MediaType), file.MediaType, cancellationToken);
+                var result = await _parserStrategy.ParseAsync(file.Bytes, GuessFileName(file.MediaType), file.MediaType, ct);
                 if (result is not null)
                     parsed.Add(result);
             }
