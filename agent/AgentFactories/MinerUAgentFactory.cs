@@ -16,20 +16,22 @@ public class MinerUAgentFactory : IAgentFactory
     private readonly OpenAIClient _openAiClient;
     private readonly ILogger _logger;
     private readonly string _nextjsBaseUrl;
-    private readonly MinerUCloudService _minerUService;
+    private readonly IDocumentParserStrategy _parserStrategy;
 
     public MinerUAgentFactory(
         IConfiguration configuration,
         ILoggerFactory loggerFactory,
         IHttpClientFactory httpClientFactory,
         IHttpContextAccessor httpContextAccessor,
-        JsonSerializerOptions jsonSerializerOptions)
+        JsonSerializerOptions jsonSerializerOptions,
+        IDocumentParserStrategy parserStrategy)
     {
         _configuration = configuration;
         _httpClientFactory = httpClientFactory;
         _httpContextAccessor = httpContextAccessor;
         _jsonSerializerOptions = jsonSerializerOptions;
         _logger = loggerFactory.CreateLogger<MinerUAgentFactory>();
+        _parserStrategy = parserStrategy;
 
         var githubToken = _configuration["GitHubToken"]
             ?? throw new InvalidOperationException(
@@ -44,16 +46,10 @@ public class MinerUAgentFactory : IAgentFactory
                 NetworkTimeout = TimeSpan.FromMinutes(5)
             });
 
-        var apiKey = Environment.GetEnvironmentVariable("MINERU_API_KEY") ?? _configuration["MINERU_API_KEY"];
-        var useStandard = string.Equals(
-            Environment.GetEnvironmentVariable("MINERU_USE_STANDARD") ?? _configuration["MINERU_USE_STANDARD"],
-            "true", StringComparison.OrdinalIgnoreCase);
         _nextjsBaseUrl = Environment.GetEnvironmentVariable("NEXTJS_URL") ?? _configuration["NEXTJS_URL"] ?? "http://localhost:3000";
 
-        _logger.LogInformation("MinerU mode: {Mode}", useStandard ? "standard" : "agent (lightweight)");
+        _logger.LogInformation("Document parser strategy: {Strategy}", _parserStrategy.GetType().Name);
         _logger.LogInformation("Next.js URL: {Url}", _nextjsBaseUrl);
-
-        _minerUService = new MinerUCloudService(_httpClientFactory, _logger, apiKey, useStandard);
     }
 
     public AIAgent CreateAgent()
@@ -69,28 +65,26 @@ public class MinerUAgentFactory : IAgentFactory
                 ONLY act on document uploads — do NOT call any tool unless the system message
                 explicitly says "The user has uploaded X file(s)".
 
-                When the system message confirms files are uploaded, follow these steps exactly once:
+                When the system message confirms files are uploaded, follow these steps:
                 1. Call parse_documents — extract text from the files via MinerU OCR.
                 2. If parse_documents returns "No documents found" or "No content could be extracted",
                    stop immediately and tell the user the extraction failed — do NOT call search_forms or fill_form.
-                3. Analyze the extracted content. Identify what type of form is needed (e.g., "job application", "customer info", "survey", etc.).
-                   Formulate a concise search query describing the form type.
-                4. Call search_forms with that query — returns forms sorted by relevance with similarity score (call this ONCE only).
-                   - If results are empty or low similarity (< 0.5), try a different query once.
-                5. Match the extracted content to the best fitting form (highest similarity).
-                   - If no form matches well, tell the user and stop — do NOT call fill_form.
-                6. Call fill_form ONLY with values that are clearly present in the extracted text.
+                3. Analyze the extracted content. Identify ALL form types that match the document content
+                   (e.g., "citizen ID card", "land use certificate", "job application", etc.).
+                   Formulate a BROAD search query that covers all identified form types.
+                4. Call search_forms ONCE with that broad query — returns forms sorted by relevance with similarity score.
+                   - If results are empty or all low similarity (< 0.5), retry once with a different query.
+                5. For EVERY form in the search results with similarity > 0.65 (good match):
+                   - Match the extracted content to the form's fields.
+                   - Call fill_form for that form with the matched values.
+                   - You may call fill_form MULTIPLE times, once per matching form.
+                6. When filling values in fill_form:
                    - For "text", "number", "email", "tel", "textarea", "select", "radio", "date" fields: use the string value directly.
                    - For "checkbox" fields: use an array of selected option values, or empty array [].
-                   - For "list" fields (repeating group): use an array of objects. Each object maps the sub-field IDs to their values. Example:
-                     If a list field "Experience" has subFields [{id:"sf_1",type:"text",label:"Company"},{id:"sf_2",type:"text",label:"Role"}],
-                     the value should be: [{"sf_1":"Vietbank","sf_2":"Developer"},{"sf_1":"VNPT","sf_2":"Manager"}]
+                   - For "list" fields (repeating group): use an array of objects. Each object maps the sub-field IDs to their values.
                    - Use empty string "" for simple fields whose value cannot be found.
                    - Use empty array [] for list/checkbox fields whose value cannot be found.
                    - NEVER invent, guess, or fill in placeholder values.
-                   - NEVER call fill_form if you have no real extracted content to work with.
-
-                Never call search_forms or fill_form more than once per response (unless search_forms returns low-similarity results, then you may retry once with a different query).
                 """,
             tools: [
                 AIFunctionFactory.Create(ParseDocumentsAsync, options: new() { Name = "parse_documents", SerializerOptions = _jsonSerializerOptions }),
@@ -117,10 +111,10 @@ public class MinerUAgentFactory : IAgentFactory
         var parsed = new List<string>();
         foreach (var file in docFiles)
         {
-            _logger.LogInformation("Parsing file with MinerU: {MediaType}", file.MediaType);
+            _logger.LogInformation("Parsing file with {Strategy}: {MediaType}", _parserStrategy.GetType().Name, file.MediaType);
             try
             {
-                var result = await _minerUService.ParseAsync(file.Bytes, GuessFileName(file.MediaType), file.MediaType, cancellationToken);
+                var result = await _parserStrategy.ParseAsync(file.Bytes, GuessFileName(file.MediaType), file.MediaType, cancellationToken);
                 if (result is not null)
                     parsed.Add(result);
             }
@@ -171,9 +165,9 @@ public class MinerUAgentFactory : IAgentFactory
         }
     }
 
-    [Description("Register the matched form fill result so it can be displayed to the user. Call this after parse_documents and get_forms, exactly once.")]
+    [Description("Register a matched form fill result. Can be called MULTIPLE times if multiple forms match the document content.")]
     private Task<string> FillFormAsync(
-        [Description("The ID of the best matching form")] string formId,
+        [Description("The ID of the matching form")] string formId,
         [Description("The display title of the matched form")] string formTitle,
         [Description("JSON object mapping each fieldId to its extracted value. For \"list\" fields (repeating group), the value must be an array of objects where each object maps sub-field IDs to their values; use [] if empty. For \"checkbox\" fields, use an array of strings; use [] if empty. For all other field types, use a string value. Example: {\"field_1\":\"John\", \"field_2\":[{\"sf_a\":\"Vietbank\",\"sf_b\":\"2020\"},{\"sf_a\":\"VNPT\",\"sf_b\":\"2022\"}], \"field_3\":[\"opt1\",\"opt2\"]}")] JsonElement filledValues,
         CancellationToken cancellationToken = default)
@@ -184,13 +178,15 @@ public class MinerUAgentFactory : IAgentFactory
                 ? filledValues.EnumerateObject().ToDictionary(p => p.Name, p => p.Value)
                 : new Dictionary<string, JsonElement>();
 
-            ctx.Items["__form_fill__"] = new MinerUFormFill
+            var fills = ctx.Items["__form_fills__"] as List<MinerUFormFill> ?? [];
+            fills.Add(new MinerUFormFill
             {
                 FormId = formId,
                 FormTitle = formTitle,
                 FilledValues = valueDict
-            };
-            _logger.LogInformation("fill_form registered: formId={FormId}", formId);
+            });
+            ctx.Items["__form_fills__"] = fills;
+            _logger.LogInformation("fill_form registered: formId={FormId} (total={Count})", formId, fills.Count);
         }
         return Task.FromResult($"Form fill registered for '{formTitle}'.");
     }

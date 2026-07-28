@@ -1,0 +1,43 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["CLAUDE.md", "RTK.md"],
+  "lsp": true,
+  "formatter": true,
+  "watcher": {
+    "ignore": ["node_modules/**", ".next/**", "dist/**", ".git/**", "bin/**", "obj/**"]
+  },
+  "provider": {
+    "ollama": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Ollama",
+      "options": {
+        "baseURL": "http://localhost:11434/v1"
+      },
+      "models": {
+        "gpt-oss:120b-cloud": {
+          "name": "gpt-oss:120b-cloud"
+        },
+        "glm-5.2:cloud": {
+          "name": "glm-5.2:cloud"
+        },
+        "kimi-k3:cloud": {
+          "name": "kimi-k3:cloud"
+        }
+      }
+    },
+    "omniroute": {
+      "name": "OmniRoute",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://localhost:20128/v1",
+        "apiKey": "sk-199865a47e67a13b-5e5ccb-347d4938"
+      },
+      "models": {
+        "ollama/gpt-oss:120b-cloud": { "name": "ollama/gpt-oss:120b-cloud" },
+        "ollama/glm-5.2:cloud": { "name": "ollama/glm-5.2:cloud" },
+        "ollama/kimi-k3:cloud": { "name": "ollama/kimi-k3:cloud" },
+        "auto/best-coding": { "name": "auto/best-coding" }
+      }
+    }
+  }
+}

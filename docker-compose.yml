@@ -1,4 +1,10 @@
 services:
+  ocr:
+    build: ./ocr
+    restart: unless-stopped
+    ports:
+      - "8091:8091"
+
   postgres:
     image: pgvector/pgvector:pg16
     restart: unless-stopped

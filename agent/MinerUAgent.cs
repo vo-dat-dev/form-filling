@@ -55,16 +55,16 @@ internal sealed class MinerUAgent : DelegatingAIAgent
         await foreach (var update in InnerAgent.RunStreamingAsync(enriched, thread, options, cancellationToken).ConfigureAwait(false))
             yield return update;
 
-        // If fill_form was called by the LLM, emit the state as DataContent so the frontend picks it up
-        if (_httpContextAccessor.HttpContext?.Items["__form_fill__"] is MinerUFormFill formFill)
+        // Emit all form fills accumulated during the run
+        if (_httpContextAccessor.HttpContext?.Items["__form_fills__"] is List<MinerUFormFill> formFills && formFills.Count > 0)
         {
-            var stateBytes = JsonSerializer.SerializeToUtf8Bytes(formFill);
+            var stateBytes = JsonSerializer.SerializeToUtf8Bytes(new MinerUFormFillList { Fills = formFills });
             yield return new AgentRunResponseUpdate
             {
                 Contents = [new DataContent(stateBytes, "application/json")]
             };
-            _logger.LogInformation("Emitted form fill state: formId={FormId}", formFill.FormId);
-            _httpContextAccessor.HttpContext.Items.Remove("__form_fill__");
+            _logger.LogInformation("Emitted {Count} form fill(s)", formFills.Count);
+            _httpContextAccessor.HttpContext.Items.Remove("__form_fills__");
         }
     }
 
@@ -98,7 +98,7 @@ internal sealed class MinerUAgent : DelegatingAIAgent
         var hint = new ChatMessage(
             ChatRole.System,
             $"The user has uploaded {totalFiles} file(s). Call the parse_documents tool to extract their content, " +
-            "then analyze the content and call search_forms to find the best matching form.");
+            "then analyze the content and call search_forms to find the best matching form(s).");
 
         return messages.Prepend(hint);
     }
@@ -143,6 +143,12 @@ internal sealed class MinerUFormFill
 
     [JsonPropertyName("filledValues")]
     public Dictionary<string, JsonElement>? FilledValues { get; set; }
+}
+
+internal sealed class MinerUFormFillList
+{
+    [JsonPropertyName("fills")]
+    public List<MinerUFormFill> Fills { get; set; } = [];
 }
 
 internal sealed class FormDto

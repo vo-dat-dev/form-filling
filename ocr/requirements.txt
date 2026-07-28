@@ -1,0 +1,6 @@
+paddlepaddle==3.2.2
+paddleocr==2.9.1
+pymupdf
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.12

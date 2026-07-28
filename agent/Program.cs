@@ -21,6 +21,37 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton(sp =>
     sp.GetRequiredService<IOptions<JsonOptions>>().Value.SerializerOptions);
 
+// Register document parser strategy (Strategy pattern)
+var parserStrategy = Environment.GetEnvironmentVariable("DOCUMENT_PARSER_STRATEGY") ?? "ocr";
+switch (parserStrategy.ToLowerInvariant())
+{
+    case "ocr":
+        var ocrUrl = Environment.GetEnvironmentVariable("OCR_URL") ?? "http://localhost:8091";
+        builder.Services.AddSingleton<IDocumentParserStrategy>(sp =>
+            new OcrServiceParserStrategy(
+                sp.GetRequiredService<IHttpClientFactory>(),
+                sp.GetRequiredService<ILoggerFactory>().CreateLogger("OcrServiceParserStrategy"),
+                ocrUrl));
+        break;
+
+    default: // "mineru"
+        builder.Services.AddSingleton<IDocumentParserStrategy>(sp =>
+        {
+            var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("MinerUCloudParserStrategy");
+            var httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
+            var config = sp.GetRequiredService<IConfiguration>();
+
+            var apiKey = Environment.GetEnvironmentVariable("MINERU_API_KEY") ?? config["MINERU_API_KEY"];
+            var useStandard = string.Equals(
+                Environment.GetEnvironmentVariable("MINERU_USE_STANDARD") ?? config["MINERU_USE_STANDARD"],
+                "true", StringComparison.OrdinalIgnoreCase);
+
+            var inner = new MinerUCloudService(httpClientFactory, logger, apiKey, useStandard);
+            return new MinerUCloudParserStrategy(inner);
+        });
+        break;
+}
+
 // Register agent factories — DI injects all dependencies automatically
 builder.Services.AddSingleton<IAgentFactory, ProverbsAgentFactory>();
 builder.Services.AddSingleton<IAgentFactory, MinerUAgentFactory>();
@@ -67,4 +98,5 @@ public partial class Program { }
 [JsonSerializable(typeof(WeatherInfo))]
 [JsonSerializable(typeof(List<FormDto>))]
 [JsonSerializable(typeof(FormDto))]
+[JsonSerializable(typeof(MinerUFormFillList))]
 internal sealed partial class AgentSerializerContext : JsonSerializerContext;

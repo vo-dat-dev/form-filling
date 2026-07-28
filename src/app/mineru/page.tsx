@@ -15,6 +15,11 @@ interface MinerUState {
   formId?: string;
   formTitle?: string;
   filledValues?: Record<string, unknown>;
+  fills?: Array<{
+    formId: string;
+    formTitle: string;
+    filledValues: Record<string, unknown>;
+  }>;
 }
 
 interface FormData {
@@ -67,8 +72,8 @@ const TOOL_META: Record<string, { label: string; icon: ReactNode }> = {
     label: "Extracting document content",
     icon: <FileSearch className="w-4 h-4" />,
   },
-  get_forms: {
-    label: "Fetching available forms",
+  search_forms: {
+    label: "Searching matching forms",
     icon: <ClipboardList className="w-4 h-4" />,
   },
   fill_form: {
@@ -88,8 +93,6 @@ function MinerUToolCallCard({
   args?: Record<string, unknown>;
   result?: unknown;
 }) {
-  if (name === "get_forms") return null;
-
   const meta = TOOL_META[name];
   const isRunning = status === "inProgress" || status === "executing";
 
@@ -101,6 +104,11 @@ function MinerUToolCallCard({
     !result.startsWith("No ")
       ? result.replace(/\s+/g, " ").trim().slice(0, 160) +
         (result.length > 160 ? "…" : "")
+      : null;
+
+  const formsResult =
+    status === "complete" && name === "search_forms" && Array.isArray(result)
+      ? (result as Array<Record<string, unknown>>).filter((f) => (f.similarity as number) > 0.5)
       : null;
 
   const formTitle =
@@ -126,6 +134,31 @@ function MinerUToolCallCard({
       {ocrSummary && (
         <div className="px-3 pb-2.5 border-t border-slate-200 pt-2">
           <p className="text-xs text-slate-500 leading-relaxed">{ocrSummary}</p>
+        </div>
+      )}
+      {formsResult && formsResult.length > 0 && (
+        <div className="px-3 pb-2.5 border-t border-slate-200 pt-2 space-y-1.5">
+          <p className="text-xs font-medium text-slate-600 mb-1">Matching forms:</p>
+          {formsResult.map((f, i) => {
+            const title = f.title as string;
+            const desc = f.description as string | undefined;
+            const sim = f.similarity as number | undefined;
+            return (
+              <div key={i} className="flex items-center justify-between text-xs bg-white rounded px-2 py-1.5 border border-slate-200">
+                <div className="min-w-0">
+                  <span className="font-medium text-slate-700">{title}</span>
+                  {desc && (
+                    <span className="text-slate-400 ml-1">— {desc.slice(0, 50)}</span>
+                  )}
+                </div>
+                {sim != null && (
+                  <span className={`shrink-0 ml-2 font-mono ${sim > 0.7 ? "text-green-600" : "text-amber-600"}`}>
+                    {sim.toFixed(2)}
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
       {status === "complete" && formTitle && (
@@ -158,68 +191,114 @@ function MinerUContent() {
     },
     [],
   );
-  const [form, setForm] = useState<FormData | null>(null);
-  const [values, setValues] = useState<Record<string, unknown>>({});
-  const [submitted, setSubmitted] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [formsList, setFormsList] = useState<FormData[]>([]);
+  const [formsValues, setFormsValues] = useState<Record<string, Record<string, unknown>>>({});
+  const [formsSubmitted, setFormsSubmitted] = useState<Record<string, boolean>>({});
+  const [formsSubmitting, setFormsSubmitting] = useState<Record<string, boolean>>({});
+  const [formsErrors, setFormsErrors] = useState<Record<string, Record<string, string>>>({});
 
   useEffect(() => {
-    if (!state?.formId) {
-      setForm(null);
+    const fills = state?.fills;
+    const singleFormId = state?.formId;
+
+    // Use fills array if available, otherwise fall back to single formId
+    const formEntries = fills?.length
+      ? fills.map((f) => ({ formId: f.formId, filledValues: f.filledValues }))
+      : singleFormId
+        ? [{ formId: singleFormId, filledValues: state?.filledValues }]
+        : [];
+
+    if (formEntries.length === 0) {
+      setFormsList([]);
+      setFormsValues({});
+      setFormsSubmitted({});
+      setFormsErrors({});
       return;
     }
 
-    fetch(`/api/forms/${state.formId}`)
-      .then((r) => r.json())
-      .then((data: FormData) => {
-        setForm(data);
-        const initial: Record<string, unknown> = {};
-        for (const f of data.fields) {
-          const pre = state.filledValues?.[f.id];
-          initial[f.id] = pre ?? (f.type === "checkbox" || f.type === "list" ? [] : "");
-        }
-        setValues(initial);
-        setSubmitted(false);
-        setErrors({});
-      })
-      .catch(console.error);
-  }, [state?.formId, state?.filledValues]);
+    // Fetch all forms in parallel
+    Promise.all(
+      formEntries.map((entry) =>
+        fetch(`/api/forms/${entry.formId}`).then((r) => r.json()) as Promise<FormData>
+      )
+    ).then((fetchedForms) => {
+      setFormsList(fetchedForms);
+      setFormsSubmitted({});
+      setFormsErrors({});
 
-  function validate(): boolean {
+      setFormsValues((prev) => {
+        const next = { ...prev };
+        for (let i = 0; i < fetchedForms.length; i++) {
+          const form = fetchedForms[i];
+          if (next[form.id]) continue; // preserve existing values
+          const filled = formEntries[i]?.filledValues;
+          const init: Record<string, unknown> = {};
+          for (const f of form.fields) {
+            const pre = filled?.[f.id];
+            init[f.id] = pre ?? (f.type === "checkbox" || f.type === "list" ? [] : "");
+          }
+          next[form.id] = init;
+        }
+        return next;
+      });
+    }).catch(console.error);
+  }, [state?.formId, state?.filledValues, state?.fills]);
+
+  function validate(formId: string): boolean {
+    const form = formsList.find((f) => f.id === formId);
+    if (!form) return false;
     const errs: Record<string, string> = {};
-    for (const field of form?.fields ?? []) {
+    const vals = formsValues[formId] ?? {};
+    for (const field of form.fields) {
       if (field.required) {
-        const val = values[field.id];
+        const val = vals[field.id];
         if (!val || (typeof val === "string" && !val.trim()) || (Array.isArray(val) && val.length === 0)) {
           errs[field.id] = `${field.label} is required`;
         }
       }
     }
-    setErrors(errs);
+    setFormsErrors((prev) => ({ ...prev, [formId]: errs }));
     return Object.keys(errs).length === 0;
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(formId: string, e: React.FormEvent) {
     e.preventDefault();
-    if (!form || !validate()) return;
-    setSubmitting(true);
+    if (!validate(formId)) return;
+    setFormsSubmitting((prev) => ({ ...prev, [formId]: true }));
     try {
-      const res = await fetch(`/api/forms/${form.id}/submissions`, {
+      const res = await fetch(`/api/forms/${formId}/submissions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(values),
+        body: JSON.stringify(formsValues[formId] ?? {}),
       });
-      if (res.ok) setSubmitted(true);
+      if (res.ok) setFormsSubmitted((prev) => ({ ...prev, [formId]: true }));
       else alert("Submission failed");
     } catch {
       alert("Submission failed");
     } finally {
-      setSubmitting(false);
+      setFormsSubmitting((prev) => ({ ...prev, [formId]: false }));
     }
   }
 
-  if (!form) {
+  function setValue(formId: string, fieldId: string, val: unknown) {
+    setFormsValues((prev) => ({
+      ...prev,
+      [formId]: { ...(prev[formId] ?? {}), [fieldId]: val },
+    }));
+    if (formsErrors[formId]?.[fieldId]) {
+      setFormsErrors((prev) => {
+        const next = { ...prev };
+        if (next[formId]) {
+          const errs = { ...next[formId] };
+          delete errs[fieldId];
+          next[formId] = errs;
+        }
+        return next;
+      });
+    }
+  }
+
+  if (formsList.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center text-center text-slate-400 select-none">
         <div>
@@ -235,58 +314,69 @@ function MinerUContent() {
     );
   }
 
-  if (submitted) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-center">
-          <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-slate-800 mb-1">
-            Form Submitted!
-          </h2>
-          <p className="text-sm text-slate-500">
-            Successfully submitted <span className="font-medium">{form.title}</span>.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-2xl mx-auto px-6 py-8">
-        <div className="mb-6">
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-green-50 text-green-700 text-xs font-medium rounded-full mb-3">
-            ✓ Form matched from document
-          </span>
-          <h2 className="text-xl font-semibold text-slate-800">{form.title}</h2>
-          {form.description && (
-            <p className="text-sm text-slate-500 mt-1">{form.description}</p>
-          )}
-        </div>
+      <div className="max-w-2xl mx-auto px-6 py-8 space-y-6">
+        {formsList.map((form) => {
+          const formId = form.id;
+          const values = formsValues[formId] ?? {};
+          const submitted = formsSubmitted[formId];
+          const submitting = formsSubmitting[formId];
+          const errors = formsErrors[formId] ?? {};
+          const isAiMatched = state?.fills
+            ? state.fills.some((f) => f.formId === formId)
+            : formId === state?.formId;
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          {form.fields
-            .sort((a, b) => a.order - b.order)
-            .map((field) => (
-              <FormFieldInput
-                key={field.id}
-                field={field}
-                value={values[field.id]}
-                error={errors[field.id]}
-                onChange={(val) =>
-                  setValues((prev) => ({ ...prev, [field.id]: val }))
-                }
-              />
-            ))}
+          if (submitted) {
+            return (
+              <div key={formId} className="rounded-lg border border-green-200 bg-green-50 p-6 text-center">
+                <CheckCircle className="w-10 h-10 text-green-500 mx-auto mb-3" />
+                <h3 className="text-base font-semibold text-green-800">{form.title}</h3>
+                <p className="text-sm text-green-600 mt-1">Đã gửi thành công!</p>
+              </div>
+            );
+          }
 
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {submitting ? "Submitting..." : "Submit Form"}
-          </button>
-        </form>
+          return (
+            <div key={formId} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
+                {isAiMatched && (
+                  <span className="inline-flex items-center px-2 py-0.5 bg-indigo-50 text-indigo-700 text-xs font-medium rounded-full">
+                    ✓ AI matched
+                  </span>
+                )}
+                <div>
+                  <h2 className="text-base font-semibold text-slate-800">{form.title}</h2>
+                  {form.description && (
+                    <p className="text-xs text-slate-500 mt-0.5">{form.description}</p>
+                  )}
+                </div>
+              </div>
+
+              <form onSubmit={(e) => handleSubmit(formId, e)} className="px-5 py-4 space-y-4">
+                {form.fields
+                  .sort((a, b) => a.order - b.order)
+                  .map((field) => (
+                    <FormFieldInput
+                      key={field.id}
+                      field={field}
+                      value={values[field.id]}
+                      error={errors[field.id]}
+                      onChange={(val) => setValue(formId, field.id, val)}
+                    />
+                  ))}
+
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="w-full py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {submitting ? "Submitting..." : `Submit ${form.title}`}
+                </button>
+              </form>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
