@@ -20,12 +20,27 @@ internal sealed class SharedStateAgent : DelegatingAIAgent
         return RunStreamingAsync(messages, thread, options, cancellationToken).ToAgentRunResponseAsync(cancellationToken);
     }
 
+    private static List<ChatMessage> TrimHistory(IEnumerable<ChatMessage> messages, int maxMessages = 10)
+    {
+        var list = messages.ToList();
+        var systemIdx = list.FindIndex(m => m.Role == ChatRole.System);
+        if (systemIdx < 0) return list.Count > maxMessages ? list[^maxMessages..] : list;
+
+        var system = list[systemIdx];
+        var rest = list[(systemIdx + 1)..];
+        return rest.Count <= maxMessages - 1
+            ? list
+            : [system, .. rest[^(maxMessages - 1)..]];
+    }
+
     public override async IAsyncEnumerable<AgentRunResponseUpdate> RunStreamingAsync(
         IEnumerable<ChatMessage> messages,
         AgentThread? thread = null,
         AgentRunOptions? options = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        messages = TrimHistory(messages);
+
         if (options is not ChatClientAgentRunOptions { ChatOptions.AdditionalProperties: { } properties } chatRunOptions ||
             !properties.TryGetValue("ag_ui_state", out JsonElement state))
         {

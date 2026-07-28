@@ -40,7 +40,8 @@ public class MinerUAgentFactory : IAgentFactory
             new System.ClientModel.ApiKeyCredential(githubToken),
             new OpenAIClientOptions
             {
-                Endpoint = new Uri(Environment.GetEnvironmentVariable("OPENAI_BASE_URL") ?? "https://models.inference.ai.azure.com")
+                Endpoint = new Uri(Environment.GetEnvironmentVariable("OPENAI_BASE_URL") ?? "https://models.inference.ai.azure.com"),
+                NetworkTimeout = TimeSpan.FromMinutes(5)
             });
 
         var apiKey = Environment.GetEnvironmentVariable("MINERU_API_KEY") ?? _configuration["MINERU_API_KEY"];
@@ -57,7 +58,7 @@ public class MinerUAgentFactory : IAgentFactory
 
     public AIAgent CreateAgent()
     {
-        var chatClient = _openAiClient.GetChatClient("gpt-4o-mini").AsIChatClient();
+        var chatClient = _openAiClient.GetChatClient("gpt-4o").AsIChatClient();
 
         var chatClientAgent = new ChatClientAgent(
             chatClient,
@@ -130,9 +131,10 @@ public class MinerUAgentFactory : IAgentFactory
             }
         }
 
-        return parsed.Count > 0
+        var text = parsed.Count > 0
             ? string.Join("\n\n---\n\n", parsed)
             : "No content could be extracted from the documents.";
+        return text.Length <= 3000 ? text : text[..3000] + "\n\n[truncated]";
     }
 
     [Description("Search forms by semantic similarity. Analyze the parsed document, then call this with a query describing the form type needed. Returns forms sorted by relevance with a similarity score.")]
@@ -156,6 +158,7 @@ public class MinerUAgentFactory : IAgentFactory
             var encoded = Uri.EscapeDataString(query);
             var json = await client.GetStringAsync($"{_nextjsBaseUrl}/api/forms?q={encoded}", cancellationToken);
             var forms = JsonSerializer.Deserialize<List<FormDto>>(json) ?? [];
+            forms.ForEach(f => f.Embedding = null); // strip embeddings before sending to LLM
             _logger.LogInformation("search_forms returned {Count} results for query: {Query}", forms.Count, query);
             if (_httpContextAccessor.HttpContext is { } c)
                 c.Items["__forms_cache__"] = forms;

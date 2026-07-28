@@ -31,13 +31,26 @@ internal sealed class MinerUAgent : DelegatingAIAgent
         return RunStreamingAsync(messages, thread, options, cancellationToken).ToAgentRunResponseAsync(cancellationToken);
     }
 
+    private static IEnumerable<ChatMessage> TrimHistory(IEnumerable<ChatMessage> messages, int maxMessages = 10)
+    {
+        var list = messages.ToList();
+        var systemIdx = list.FindIndex(m => m.Role == ChatRole.System);
+        if (systemIdx < 0) return list.Count > maxMessages ? list[^maxMessages..] : list;
+
+        var system = list[systemIdx];
+        var rest = list[(systemIdx + 1)..];
+        return rest.Count <= maxMessages - 1
+            ? list
+            : [system, .. rest[^(maxMessages - 1)..]];
+    }
+
     public override async IAsyncEnumerable<AgentRunResponseUpdate> RunStreamingAsync(
         IEnumerable<ChatMessage> messages,
         AgentThread? thread = null,
         AgentRunOptions? options = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var enriched = PrepareMessages(messages.ToList());
+        var enriched = PrepareMessages(TrimHistory(messages).ToList());
 
         await foreach (var update in InnerAgent.RunStreamingAsync(enriched, thread, options, cancellationToken).ConfigureAwait(false))
             yield return update;

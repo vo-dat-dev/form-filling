@@ -34,13 +34,14 @@ public class ProverbsAgentFactory : IAgentFactory
             new System.ClientModel.ApiKeyCredential(githubToken),
             new OpenAIClientOptions
             {
-                Endpoint = new Uri(Environment.GetEnvironmentVariable("OPENAI_BASE_URL") ?? "https://models.inference.ai.azure.com")
+                Endpoint = new Uri(Environment.GetEnvironmentVariable("OPENAI_BASE_URL") ?? "https://models.inference.ai.azure.com"),
+                NetworkTimeout = TimeSpan.FromMinutes(5)
             });
     }
 
     public AIAgent CreateAgent()
     {
-        var chatClient = _openAiClient.GetChatClient("gpt-4o-mini").AsIChatClient();
+        var chatClient = _openAiClient.GetChatClient("gpt-4o").AsIChatClient();
 
         var chatClientAgent = new ChatClientAgent(
             chatClient,
