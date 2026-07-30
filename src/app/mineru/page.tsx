@@ -3,6 +3,7 @@
 import {
   CopilotChatConfigurationProvider,
   CopilotSidebar,
+  CopilotThreadsDrawer,
   useRenderTool,
 } from "@copilotkit/react-core/v2";
 import { useCoAgent } from "@copilotkit/react-core";
@@ -10,6 +11,7 @@ import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { CheckCircle, FileSearch, ClipboardList, PenLine, Loader2, Plus, Trash2 } from "lucide-react";
 import type { FormField } from "@/lib/types";
+import styles from "../page.module.css";
 
 interface MinerUState {
   formId?: string;
@@ -32,34 +34,39 @@ interface FormData {
 export default function MinerUPage() {
   return (
     <CopilotChatConfigurationProvider agentId="minerU">
-      <div className="h-screen flex flex-col bg-slate-50">
-        <header className="flex items-center gap-4 px-6 py-3 bg-white border-b border-slate-200 shadow-sm">
-          <Link
-            href="/"
-            className="text-slate-500 hover:text-slate-800 text-sm transition-colors"
-          >
-            ← Back
-          </Link>
-          <h1 className="text-lg font-semibold text-slate-800">
-            MinerU Document Assistant
-          </h1>
-          <span className="text-xs text-slate-400 ml-auto">
-            Upload PDF, Word, Excel, PowerPoint, or images
-          </span>
-        </header>
+      <div className={`${styles.layout} threadsLayout`}>
+        <CopilotThreadsDrawer agentId="minerU" />
+        <div className={styles.mainPanel}>
+          <div className="h-screen flex flex-col bg-slate-50">
+            <header className="flex items-center gap-4 px-6 py-3 bg-white border-b border-slate-200 shadow-sm">
+              <Link
+                href="/"
+                className="text-slate-500 hover:text-slate-800 text-sm transition-colors"
+              >
+                ← Back
+              </Link>
+              <h1 className="text-lg font-semibold text-slate-800">
+                MinerU Document Assistant
+              </h1>
+              <span className="text-xs text-slate-400 ml-auto">
+                Upload PDF, Word, Excel, PowerPoint, or images
+              </span>
+            </header>
 
-        <main className="flex-1 flex relative overflow-hidden">
-          <MinerUContent />
-          <CopilotSidebar
-            defaultOpen={true}
-            labels={{
-              modalHeaderTitle: "MinerU Assistant",
-              welcomeMessageText:
-                "👋 Upload a document (PDF, Word, image…) and I'll extract its content, find the best matching form, and fill it in for you.",
-            }}
-            attachments={{ enabled: true, maxSize: 50 * 1024 * 1024 }}
-          />
-        </main>
+            <main className="flex-1 flex relative overflow-hidden">
+              <MinerUContent />
+              <CopilotSidebar
+                defaultOpen={true}
+                labels={{
+                  modalHeaderTitle: "MinerU Assistant",
+                  welcomeMessageText:
+                    "👋 Upload a document (PDF, Word, image…) and I'll extract its content, find the best matching form, and fill it in for you.",
+                }}
+                attachments={{ enabled: true, maxSize: 50 * 1024 * 1024 }}
+              />
+            </main>
+          </div>
+        </div>
       </div>
     </CopilotChatConfigurationProvider>
   );
