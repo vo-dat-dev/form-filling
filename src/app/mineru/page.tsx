@@ -3,10 +3,10 @@
 import {
   CopilotChatConfigurationProvider,
   CopilotSidebar,
-  CopilotThreadsDrawer,
   useRenderTool,
 } from "@copilotkit/react-core/v2";
 import { useCoAgent } from "@copilotkit/react-core";
+import { ThreadsDrawer } from "@/components/threads-drawer";
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { CheckCircle, FileSearch, ClipboardList, PenLine, Loader2, Plus, Trash2 } from "lucide-react";
@@ -35,7 +35,7 @@ export default function MinerUPage() {
   return (
     <CopilotChatConfigurationProvider agentId="minerU">
       <div className={`${styles.layout} threadsLayout`}>
-        <CopilotThreadsDrawer agentId="minerU" />
+        <ThreadsDrawer agentId="minerU"/>
         <div className={styles.mainPanel}>
           <div className="h-screen flex flex-col bg-slate-50">
             <header className="flex items-center gap-4 px-6 py-3 bg-white border-b border-slate-200 shadow-sm">

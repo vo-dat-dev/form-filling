@@ -26,3 +26,14 @@ model FormSubmission {
   data      Json
   createdAt DateTime @default(now())
 }
+
+model Thread {
+  id        String   @id @default(uuid())
+  agentId   String
+  title     String   @default("New Conversation")
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([agentId])
+}

@@ -9,8 +9,8 @@ import {
   useHumanInTheLoop,
   CopilotSidebar,
   CopilotChatConfigurationProvider,
-  CopilotThreadsDrawer,
 } from "@copilotkit/react-core/v2";
+import { ThreadsDrawer } from "@/components/threads-drawer";
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import Link from "next/link";
@@ -50,8 +50,8 @@ export default function CopilotKitPage() {
     */
     <CopilotChatConfigurationProvider agentId="default">
       <div className={`${styles.layout} threadsLayout`}>
-        {/* SDK threads drawer (replaces the hand-rolled fork). License-gated: the locked view's Upgrade CTA opens the Intelligence docs by default. */}
-        <CopilotThreadsDrawer agentId="default" />
+        {/* Custom threads drawer backed by the /api/threads CRUD endpoints */}
+        <ThreadsDrawer agentId="default" />
         <div className={styles.mainPanel}>
           <main
             style={
