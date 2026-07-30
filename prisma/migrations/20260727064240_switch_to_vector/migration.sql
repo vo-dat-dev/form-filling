@@ -1,5 +1,0 @@
-CREATE EXTENSION IF NOT EXISTS vector;
-
-ALTER TABLE "Form" DROP COLUMN IF EXISTS "embedding";
-
-ALTER TABLE "Form" ADD COLUMN "embedding" vector(1024);

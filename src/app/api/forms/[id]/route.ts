@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { formsApi } from "@/lib/api-client";
 import type { FormConfig } from "@/lib/types";
 import { generateEmbedding } from "@/lib/embedding";
 
@@ -9,32 +9,14 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-
-    const rows = await prisma.$queryRawUnsafe<
-      Array<Record<string, unknown>>
-    >(
-       `SELECT f.*, f.embedding::text AS embedding
-        FROM "Form" f WHERE f.id = $1`,
-       id,
-    );
-
-    if (!rows[0]) {
+    const form = await formsApi.get(id);
+    if (!form) {
       return NextResponse.json({ error: "Form not found" }, { status: 404 });
     }
-
-    const { embedding: embStr, ...rest } = rows[0];
-    const form = {
-      ...rest,
-      embedding: embStr ? JSON.parse(embStr as string) : null,
-    };
-
     return NextResponse.json(form);
   } catch (error) {
     console.error("Failed to fetch form:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch form" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to fetch form" }, { status: 500 });
   }
 }
 
@@ -44,61 +26,36 @@ export async function PUT(
 ) {
   try {
     const { id } = await params;
-    const body = (await request.json()) as FormConfig;
+    const body = (await request.json()) as FormConfig & { existingDescription?: string; descriptionChanged?: boolean };
 
-    const existing = await prisma.form.findUnique({ where: { id } });
+    const existing = await formsApi.get(id);
     if (!existing) {
       return NextResponse.json({ error: "Form not found" }, { status: 404 });
     }
 
-    const embedding =
-      body.description !== existing.description
-        ? await generateEmbedding(body.description ?? "")
-        : undefined;
+    const descriptionChanged = body.description !== (body.existingDescription ?? existing.description);
+    let embedding: number[] | null | undefined;
 
-    const form = await prisma.form.update({
-      where: { id },
-      data: {
-        title: body.title,
-        description: body.description ?? null,
-        fields: JSON.parse(JSON.stringify(body.fields)),
-      },
-    });
-
-    if (embedding !== undefined) {
-      if (embedding) {
-        await prisma.$executeRawUnsafe(
-          `UPDATE "Form" SET embedding = $1::vector WHERE id = $2`,
-          `[${embedding.join(",")}]`,
-          form.id,
-        );
-      } else {
-        await prisma.$executeRawUnsafe(
-          `UPDATE "Form" SET embedding = NULL WHERE id = $1`,
-          form.id,
-        );
-      }
+    if (descriptionChanged) {
+      embedding = body.description
+        ? await generateEmbedding(body.description)
+        : null;
     }
 
-    const resultEmbedding =
-      embedding !== undefined
-        ? embedding
-        : await (async () => {
-            const r = await prisma.$queryRawUnsafe<Array<{ embedding: string | null }>>(
-              `SELECT embedding::text AS embedding FROM "Form" WHERE id = $1`,
-              form.id);
-            return r[0]?.embedding
-              ? JSON.parse(r[0].embedding)
-              : null;
-          })();
+    const form = await formsApi.update(id, {
+      title: body.title,
+      description: body.description ?? undefined,
+      fields: JSON.stringify(body.fields),
+      embedding: embedding !== undefined
+        ? (embedding ? `[${embedding.join(",")}]` : "")
+        : undefined,
+      descriptionChanged,
+    });
 
-    return NextResponse.json({ ...form, embedding: resultEmbedding });
+    return NextResponse.json(form);
   } catch (error) {
     console.error("Failed to update form:", error);
-    return NextResponse.json(
-      { error: "Failed to update form" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to update form" }, { status: 500 });
   }
 }
 
@@ -108,17 +65,10 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    const existing = await prisma.form.findUnique({ where: { id } });
-    if (!existing) {
-      return NextResponse.json({ error: "Form not found" }, { status: 404 });
-    }
-    await prisma.form.delete({ where: { id } });
+    await formsApi.delete(id);
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Failed to delete form:", error);
-    return NextResponse.json(
-      { error: "Failed to delete form" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to delete form" }, { status: 500 });
   }
 }

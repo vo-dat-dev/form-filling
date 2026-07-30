@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { threadsApi } from "@/lib/api-client";
 
 export async function PATCH(
   request: NextRequest,
@@ -8,20 +8,9 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json();
-
-    const thread = await prisma.thread.update({
-      where: { id },
-      data: {
-        title: body.title,
-        metadata: body.metadata ?? undefined,
-      },
-      select: {
-        id: true,
-        agentId: true,
-        title: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+    const thread = await threadsApi.update(id, {
+      title: body.title,
+      metadata: body.metadata ?? undefined,
     });
     return NextResponse.json(thread);
   } catch (error) {
@@ -36,7 +25,7 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    await prisma.thread.delete({ where: { id } });
+    await threadsApi.delete(id);
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Failed to delete thread:", error);

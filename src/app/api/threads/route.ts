@@ -1,20 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { threadsApi } from "@/lib/api-client";
 
 export async function GET(request: NextRequest) {
   try {
     const agentId = request.nextUrl.searchParams.get("agentId") ?? "minerU";
-    const threads = await prisma.thread.findMany({
-      where: { agentId },
-      orderBy: { updatedAt: "desc" },
-      select: {
-        id: true,
-        agentId: true,
-        title: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
+    const threads = await threadsApi.list(agentId);
     return NextResponse.json(threads);
   } catch (error) {
     console.error("Failed to fetch threads:", error);
@@ -25,18 +15,9 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const agentId = body.agentId ?? "minerU";
-    const title = body.title ?? "New Conversation";
-
-    const thread = await prisma.thread.create({
-      data: { agentId, title },
-      select: {
-        id: true,
-        agentId: true,
-        title: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+    const thread = await threadsApi.create({
+      agentId: body.agentId ?? "minerU",
+      title: body.title ?? "New Conversation",
     });
     return NextResponse.json(thread, { status: 201 });
   } catch (error) {
