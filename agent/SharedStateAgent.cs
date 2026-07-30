@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 
+#pragma warning disable MEAI001 // ContinuationToken is evaluation-only
 [SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "Instantiated by ProverbsAgentFactory")]
 internal sealed class SharedStateAgent : DelegatingAIAgent
 {
@@ -15,9 +16,9 @@ internal sealed class SharedStateAgent : DelegatingAIAgent
         _jsonSerializerOptions = jsonSerializerOptions;
     }
 
-    public override Task<AgentRunResponse> RunAsync(IEnumerable<ChatMessage> messages, AgentThread? thread = null, AgentRunOptions? options = null, CancellationToken cancellationToken = default)
+    protected override Task<AgentResponse> RunCoreAsync(IEnumerable<ChatMessage> messages, AgentSession? thread = null, AgentRunOptions? options = null, CancellationToken cancellationToken = default)
     {
-        return RunStreamingAsync(messages, thread, options, cancellationToken).ToAgentRunResponseAsync(cancellationToken);
+        return RunCoreStreamingAsync(messages, thread, options, cancellationToken).ToAgentResponseAsync(cancellationToken);
     }
 
     private static List<ChatMessage> TrimHistory(IEnumerable<ChatMessage> messages, int maxMessages = 10)
@@ -33,9 +34,9 @@ internal sealed class SharedStateAgent : DelegatingAIAgent
             : [system, .. rest[^(maxMessages - 1)..]];
     }
 
-    public override async IAsyncEnumerable<AgentRunResponseUpdate> RunStreamingAsync(
+    protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
         IEnumerable<ChatMessage> messages,
-        AgentThread? thread = null,
+        AgentSession? thread = null,
         AgentRunOptions? options = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
@@ -74,7 +75,7 @@ internal sealed class SharedStateAgent : DelegatingAIAgent
 
         var firstRunMessages = messages.Append(stateUpdateMessage);
 
-        var allUpdates = new List<AgentRunResponseUpdate>();
+        var allUpdates = new List<AgentResponseUpdate>();
         await foreach (var update in InnerAgent.RunStreamingAsync(firstRunMessages, thread, firstRunOptions, cancellationToken).ConfigureAwait(false))
         {
             allUpdates.Add(update);
@@ -87,14 +88,27 @@ internal sealed class SharedStateAgent : DelegatingAIAgent
             }
         }
 
-        var response = allUpdates.ToAgentRunResponse();
+        var response = allUpdates.ToAgentResponse();
 
-        if (response.TryDeserialize(_jsonSerializerOptions, out JsonElement stateSnapshot))
+        JsonElement? stateSnapshot = response.Messages
+            .SelectMany(m => m.Contents)
+            .OfType<DataContent>()
+            .Where(d => d.MediaType == "application/json")
+            .Select(d =>
+            {
+                var bytes = d.Data.IsEmpty && d.Uri is { } uri
+                    ? Convert.FromBase64String(uri[(uri.IndexOf(',') + 1)..])
+                    : d.Data.ToArray();
+                return JsonSerializer.Deserialize<JsonElement>(bytes, _jsonSerializerOptions);
+            })
+            .LastOrDefault();
+
+        if (stateSnapshot is { ValueKind: not JsonValueKind.Undefined } snap)
         {
             byte[] stateBytes = JsonSerializer.SerializeToUtf8Bytes(
-                stateSnapshot,
+                snap,
                 _jsonSerializerOptions.GetTypeInfo(typeof(JsonElement)));
-            yield return new AgentRunResponseUpdate
+            yield return new AgentResponseUpdate
             {
                 Contents = [new DataContent(stateBytes, "application/json")]
             };

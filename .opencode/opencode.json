@@ -29,15 +29,12 @@
       "name": "OmniRoute",
       "npm": "@ai-sdk/openai-compatible",
       "options": {
-        "baseURL": "http://localhost:20128/v1",
-        "apiKey": "sk-199865a47e67a13b-5e5ccb-347d4938"
+        "baseURL": "http://45.119.84.168:20128/v1",
+        "apiKey": "sk-f7cecacb06b57f66-e85e73-7f0a55d2"
       },
       "models": {
-        "ollama/gpt-oss:120b-cloud": { "name": "ollama/gpt-oss:120b-cloud" },
-        "ollama/glm-5.2:cloud": { "name": "ollama/glm-5.2:cloud" },
-        "ollama/kimi-k3:cloud": { "name": "ollama/kimi-k3:cloud" },
-        "auto/best-coding": { "name": "auto/best-coding" }
+        "oc/deepseek-v4-flash-free": { "name": "oc/deepseek-v4-flash-free" },
       }
-    }
+    } 
   }
 }

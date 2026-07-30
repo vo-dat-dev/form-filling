@@ -3,9 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   typescript: { ignoreBuildErrors: true },
   serverExternalPackages: ["@copilotkit/runtime"],
-  experimental: {
-    bodySizeLimit: "100mb",
-  },
+  experimental: {},
   env: {
     // The public Threads UI flag is DERIVED from the server-side license token.
     // Set COPILOTKIT_LICENSE_TOKEN (only) to enable Threads — do not set this flag

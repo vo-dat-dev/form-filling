@@ -1,4 +1,6 @@
+#pragma warning disable MAAI001
 using Microsoft.Agents.AI;
+using Microsoft.Agents.AI.Compaction;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.AI;
 using OpenAI;
@@ -56,43 +58,55 @@ public class MinerUAgentFactory : IAgentFactory
     {
         var chatClient = _openAiClient.GetChatClient("gpt-4o-mini").AsIChatClient();
 
-        var chatClientAgent = new ChatClientAgent(
-            chatClient,
-            name: "MinerUAgent",
-            description: """
-                A document-processing assistant.
+        var compactionPipeline = new PipelineCompactionStrategy(
+            new ToolResultCompactionStrategy(CompactionTriggers.TokensExceed(0x200)),
+            new SlidingWindowCompactionStrategy(CompactionTriggers.TurnsExceed(4)),
+            new TruncationCompactionStrategy(CompactionTriggers.TokensExceed(0x8000)));
 
-                ONLY act on document uploads — do NOT call any tool unless the system message
-                explicitly says "The user has uploaded X file(s)".
+        var innerAgent = chatClient
+            .AsBuilder()
+            .UseAIContextProviders(new CompactionProvider(compactionPipeline))
+            .BuildAIAgent(new ChatClientAgentOptions
+            {
+                Name = "MinerUAgent",
+                ChatOptions = new()
+                {
+                    Instructions = """
+                        A document-processing assistant.
 
-                When the system message confirms files are uploaded, follow these steps:
-                1. Call parse_documents — extract text from the files via MinerU OCR.
-                2. If parse_documents returns "No documents found" or "No content could be extracted",
-                   stop immediately and tell the user the extraction failed — do NOT call search_forms or fill_form.
-                3. Analyze the extracted content. Identify ALL form types that match the document content
-                   (e.g., "citizen ID card", "land use certificate", "job application", etc.).
-                   Formulate a BROAD search query that covers all identified form types.
-                4. Call search_forms ONCE with that broad query — returns forms sorted by relevance with similarity score.
-                   - If results are empty or all low similarity (< 0.5), retry once with a different query.
-                5. For EVERY form in the search results with similarity > 0.65 (good match):
-                   - Match the extracted content to the form's fields.
-                   - Call fill_form for that form with the matched values.
-                   - You may call fill_form MULTIPLE times, once per matching form.
-                6. When filling values in fill_form:
-                   - For "text", "number", "email", "tel", "textarea", "select", "radio", "date" fields: use the string value directly.
-                   - For "checkbox" fields: use an array of selected option values, or empty array [].
-                   - For "list" fields (repeating group): use an array of objects. Each object maps the sub-field IDs to their values.
-                   - Use empty string "" for simple fields whose value cannot be found.
-                   - Use empty array [] for list/checkbox fields whose value cannot be found.
-                   - NEVER invent, guess, or fill in placeholder values.
-                """,
-            tools: [
-                AIFunctionFactory.Create(ParseDocumentsAsync, options: new() { Name = "parse_documents", SerializerOptions = _jsonSerializerOptions }),
-                AIFunctionFactory.Create(SearchFormsAsync, options: new() { Name = "search_forms", SerializerOptions = _jsonSerializerOptions }),
-                AIFunctionFactory.Create(FillFormAsync, options: new() { Name = "fill_form", SerializerOptions = _jsonSerializerOptions }),
-            ]);
+                        ONLY act on document uploads — do NOT call any tool unless the system message
+                        explicitly says "The user has uploaded X file(s)".
 
-        return new MinerUAgent(chatClientAgent, _httpContextAccessor, _logger);
+                        When the system message confirms files are uploaded, follow these steps:
+                        1. Call parse_documents — extract text from the files via MinerU OCR.
+                        2. If parse_documents returns "No documents found" or "No content could be extracted",
+                           stop immediately and tell the user the extraction failed — do NOT call search_forms or fill_form.
+                        3. Analyze the extracted content. Identify ALL form types that match the document content
+                           (e.g., "citizen ID card", "land use certificate", "job application", etc.).
+                           Formulate a BROAD search query that covers all identified form types.
+                        4. Call search_forms ONCE with that broad query — returns forms sorted by relevance with similarity score.
+                           - If results are empty or all low similarity (< 0.5), retry once with a different query.
+                        5. For EVERY form in the search results with similarity > 0.65 (good match):
+                           - Match the extracted content to the form's fields.
+                           - Call fill_form for that form with the matched values.
+                           - You may call fill_form MULTIPLE times, once per matching form.
+                        6. When filling values in fill_form:
+                           - For "text", "number", "email", "tel", "textarea", "select", "radio", "date" fields: use the string value directly.
+                           - For "checkbox" fields: use an array of selected option values, or empty array [].
+                           - For "list" fields (repeating group): use an array of objects. Each object maps the sub-field IDs to their values.
+                           - Use empty string "" for simple fields whose value cannot be found.
+                           - Use empty array [] for list/checkbox fields whose value cannot be found.
+                           - NEVER invent, guess, or fill in placeholder values.
+                        """,
+                    Tools = [
+                        AIFunctionFactory.Create(ParseDocumentsAsync, options: new() { Name = "parse_documents", SerializerOptions = _jsonSerializerOptions }),
+                        AIFunctionFactory.Create(SearchFormsAsync, options: new() { Name = "search_forms", SerializerOptions = _jsonSerializerOptions }),
+                        AIFunctionFactory.Create(FillFormAsync, options: new() { Name = "fill_form", SerializerOptions = _jsonSerializerOptions }),
+                    ],
+                },
+            });
+
+        return new MinerUAgent(innerAgent, _httpContextAccessor, _logger);
     }
 
     // =================

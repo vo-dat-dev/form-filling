@@ -22,35 +22,22 @@ internal sealed class MinerUAgent : DelegatingAIAgent
         _logger = logger;
     }
 
-    public override Task<AgentRunResponse> RunAsync(
+    protected override Task<AgentResponse> RunCoreAsync(
         IEnumerable<ChatMessage> messages,
-        AgentThread? thread = null,
+        AgentSession? thread = null,
         AgentRunOptions? options = null,
         CancellationToken cancellationToken = default)
     {
-        return RunStreamingAsync(messages, thread, options, cancellationToken).ToAgentRunResponseAsync(cancellationToken);
+        return RunCoreStreamingAsync(messages, thread, options, cancellationToken).ToAgentResponseAsync(cancellationToken);
     }
 
-    private static IEnumerable<ChatMessage> TrimHistory(IEnumerable<ChatMessage> messages, int maxMessages = 10)
-    {
-        var list = messages.ToList();
-        var systemIdx = list.FindIndex(m => m.Role == ChatRole.System);
-        if (systemIdx < 0) return list.Count > maxMessages ? list[^maxMessages..] : list;
-
-        var system = list[systemIdx];
-        var rest = list[(systemIdx + 1)..];
-        return rest.Count <= maxMessages - 1
-            ? list
-            : [system, .. rest[^(maxMessages - 1)..]];
-    }
-
-    public override async IAsyncEnumerable<AgentRunResponseUpdate> RunStreamingAsync(
+    protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
         IEnumerable<ChatMessage> messages,
-        AgentThread? thread = null,
+        AgentSession? thread = null,
         AgentRunOptions? options = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var enriched = PrepareMessages(TrimHistory(messages).ToList());
+        var enriched = PrepareMessages(messages.ToList());
 
         await foreach (var update in InnerAgent.RunStreamingAsync(enriched, thread, options, cancellationToken).ConfigureAwait(false))
             yield return update;
@@ -59,7 +46,7 @@ internal sealed class MinerUAgent : DelegatingAIAgent
         if (_httpContextAccessor.HttpContext?.Items["__form_fills__"] is List<MinerUFormFill> formFills && formFills.Count > 0)
         {
             var stateBytes = JsonSerializer.SerializeToUtf8Bytes(new MinerUFormFillList { Fills = formFills });
-            yield return new AgentRunResponseUpdate
+            yield return new AgentResponseUpdate
             {
                 Contents = [new DataContent(stateBytes, "application/json")]
             };
