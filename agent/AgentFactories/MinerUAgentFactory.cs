@@ -3,7 +3,6 @@ using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Compaction;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.AI;
-using OpenAI;
 using System.ComponentModel;
 using System.Text.Json;
 
@@ -15,13 +14,14 @@ public class MinerUAgentFactory : IAgentFactory
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly JsonSerializerOptions _jsonSerializerOptions;
-    private readonly OpenAIClient _openAiClient;
+    private readonly IChatClient _chatClient;
     private readonly ILogger _logger;
     private readonly string _nextjsBaseUrl;
     private readonly IDocumentParserStrategy _parserStrategy;
 
     public MinerUAgentFactory(
         IConfiguration configuration,
+        IChatClient chatClient,
         ILoggerFactory loggerFactory,
         IHttpClientFactory httpClientFactory,
         IHttpContextAccessor httpContextAccessor,
@@ -29,24 +29,12 @@ public class MinerUAgentFactory : IAgentFactory
         IDocumentParserStrategy parserStrategy)
     {
         _configuration = configuration;
+        _chatClient = chatClient;
         _httpClientFactory = httpClientFactory;
         _httpContextAccessor = httpContextAccessor;
         _jsonSerializerOptions = jsonSerializerOptions;
         _logger = loggerFactory.CreateLogger<MinerUAgentFactory>();
         _parserStrategy = parserStrategy;
-
-        var githubToken = _configuration["GitHubToken"]
-            ?? throw new InvalidOperationException(
-                "GitHubToken not found in configuration. " +
-                "Please set it using: dotnet user-secrets set GitHubToken \"<your-token>\"");
-
-        _openAiClient = new(
-            new System.ClientModel.ApiKeyCredential(githubToken),
-            new OpenAIClientOptions
-            {
-                Endpoint = new Uri(Environment.GetEnvironmentVariable("OPENAI_BASE_URL") ?? "https://models.inference.ai.azure.com"),
-                NetworkTimeout = TimeSpan.FromMinutes(5)
-            });
 
         _nextjsBaseUrl = Environment.GetEnvironmentVariable("NEXTJS_URL") ?? _configuration["NEXTJS_URL"] ?? "http://localhost:3000";
 
@@ -56,14 +44,12 @@ public class MinerUAgentFactory : IAgentFactory
 
     public AIAgent CreateAgent()
     {
-        var chatClient = _openAiClient.GetChatClient("gpt-4o-mini").AsIChatClient();
-
         var compactionPipeline = new PipelineCompactionStrategy(
             new ToolResultCompactionStrategy(CompactionTriggers.TokensExceed(0x200)),
             new SlidingWindowCompactionStrategy(CompactionTriggers.TurnsExceed(4)),
             new TruncationCompactionStrategy(CompactionTriggers.TokensExceed(0x8000)));
 
-        var innerAgent = chatClient
+        var innerAgent = _chatClient
             .AsBuilder()
             .UseAIContextProviders(new CompactionProvider(compactionPipeline))
             .BuildAIAgent(new ChatClientAgentOptions

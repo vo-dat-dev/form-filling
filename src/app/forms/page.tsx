@@ -14,7 +14,7 @@ interface FormListItem {
   similarity: number | null;
   createdAt: string;
   updatedAt: string;
-  _count: { submissions: number };
+  count: number;
 }
 
 
@@ -150,7 +150,7 @@ export default function FormsPage() {
                       className="flex items-center gap-1 hover:text-indigo-600 transition-colors"
                     >
                       <Inbox className="w-3 h-3" />
-                      {form._count.submissions} submissions
+                      {form.count} submissions
                     </Link>
                     <span className="flex items-center gap-1">
                       <Clock className="w-3 h-3" />

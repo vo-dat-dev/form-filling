@@ -1,6 +1,5 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
-using OpenAI;
 using System.ComponentModel;
 using System.Text.Json.Serialization;
 
@@ -8,43 +7,26 @@ public class ProverbsAgentFactory : IAgentFactory
 {
     public string Route => "/";
 
-    private readonly IConfiguration _configuration;
     private readonly ProverbsState _state;
-    private readonly OpenAIClient _openAiClient;
+    private readonly IChatClient _chatClient;
     private readonly ILogger _logger;
     private readonly System.Text.Json.JsonSerializerOptions _jsonSerializerOptions;
 
     public ProverbsAgentFactory(
-        IConfiguration configuration,
+        IChatClient chatClient,
         ILoggerFactory loggerFactory,
         System.Text.Json.JsonSerializerOptions jsonSerializerOptions)
     {
-        _configuration = configuration;
         _state = new();
+        _chatClient = chatClient;
         _logger = loggerFactory.CreateLogger<ProverbsAgentFactory>();
         _jsonSerializerOptions = jsonSerializerOptions;
-
-        var githubToken = _configuration["GitHubToken"]
-            ?? throw new InvalidOperationException(
-                "GitHubToken not found in configuration. " +
-                "Please set it using: dotnet user-secrets set GitHubToken \"<your-token>\" " +
-                "or get it using: gh auth token");
-
-        _openAiClient = new(
-            new System.ClientModel.ApiKeyCredential(githubToken),
-            new OpenAIClientOptions
-            {
-                Endpoint = new Uri(Environment.GetEnvironmentVariable("OPENAI_BASE_URL") ?? "https://models.inference.ai.azure.com"),
-                NetworkTimeout = TimeSpan.FromMinutes(5)
-            });
     }
 
     public AIAgent CreateAgent()
     {
-        var chatClient = _openAiClient.GetChatClient("gpt-4o").AsIChatClient();
-
         var chatClientAgent = new ChatClientAgent(
-            chatClient,
+            _chatClient,
             name: "ProverbsAgent",
             description: @"A helpful assistant that helps manage and discuss proverbs.
             You have tools available to add, set, or retrieve proverbs from the list.

@@ -1,6 +1,7 @@
 using Microsoft.Agents.AI.Hosting.AGUI.AspNetCore;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -21,6 +22,10 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 builder.Services.AddAGUI();
 builder.Services.AddHttpClient();
 builder.Services.AddHttpContextAccessor();
+
+// Shared chat client (single DI-injected IChatClient for all agents)
+builder.Services.AddSingleton<IChatClient, OllamaChatClientImpl>();
+// builder.Services.AddSingleton<IChatClient, OpenAIChatClientImpl>();
 
 // Database
 static string ToNpgsqlConnString(string? url)

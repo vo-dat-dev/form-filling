@@ -4,9 +4,8 @@ This is a starter template for building AI agents using [Microsoft Agent Framewo
 
 ## Prerequisites
 
-- **GitHub Personal Access Token** (for GitHub Models API)
-  - Retrieve from GitHub using [these instructions](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-personal-access-token-classic).
-  - or generate via `gh auth token` in your CLI (requires [GitHub CLI](https://github.com/cli/cli?tab=readme-ov-file#installation))
+- **OpenAI API Key** (for the agent's chat clients)
+  - Retrieve from [OpenAI API Keys](https://platform.openai.com/api-keys).
 - **.NET 9.0 SDK**
   - [Download directly](https://dotnet.microsoft.com/download/dotnet/9.0)
   - macOS/Linux
@@ -77,27 +76,30 @@ This is a starter template for building AI agents using [Microsoft Agent Framewo
    > npm run install:agent
    > ```
 
-2. Set up your GitHub token for GitHub Models:
+2. Set up your OpenAI API key for the agent:
 
-   First, get your GitHub token:
-
-   ```bash
-   gh auth token
-   ```
-
-   Then, navigate to the agent directory and set it as a user secret:
+   Navigate to the agent directory and set it as a user secret:
 
    ```bash
    cd agent
-   dotnet user-secrets set GitHubToken "<your-token>"
+   dotnet user-secrets set "OpenAI:ApiKey" "<your-openai-api-key>"
    cd ..
    ```
 
-   Or set it in one command:
+   Or export it in your shell (overrides user secrets):
 
    ```bash
-   cd agent; dotnet user-secrets set GitHubToken "$(gh auth token)"; cd ..
+   export OPENAI_API_KEY="<your-openai-api-key>"
    ```
+
+   To use a custom OpenAI-compatible endpoint, set `OPENAI_BASE_URL`
+   (defaults to `https://api.openai.com/v1`).
+
+   The agent registers a single shared `IChatClient` as a singleton and both
+   factories (proverbs and minerU) inject the same instance. Two implementations
+   are available: `OllamaChatClientImpl` (default) and `OpenAIChatClientImpl`.
+   The provider is selected via `CHAT__PROVIDER` (`ollama` or `openai`).
+   The model is configured via `CHAT__MODEL` (default: `gpt-4o-mini`).
 
 3. Start the development server:
 
@@ -165,7 +167,7 @@ This starter showcases key AG-UI protocol features:
 - [AG-UI Protocol](https://github.com/copilotkit/ag-ui) - AG-UI protocol specification
 - [CopilotKit Documentation](https://docs.copilotkit.ai) - CopilotKit features and API
 - [Next.js Documentation](https://nextjs.org/docs) - Next.js features and API
-- [GitHub Models](https://github.com/marketplace/models) - Free AI models via GitHub
+- [OpenAI Platform](https://platform.openai.com) - OpenAI API keys and models
 
 ## Contributing
 
@@ -228,24 +230,19 @@ dotnet restore
 dotnet run
 ```
 
-### GitHub Token Issues
+### OpenAI API Key Issues
 
-If the agent fails to start with "GitHubToken not found":
+If the agent fails to start with "OpenAI API key not found":
 
 ```bash
 cd agent
-dotnet user-secrets set GitHubToken "$(gh auth token)"
+dotnet user-secrets set "OpenAI:ApiKey" "<your-openai-api-key>"
 ```
 
-Or manually:
+Or set it via environment variable:
 
 ```bash
-# Get your token
-gh auth token
-
-# Set it as a user secret
-cd agent
-dotnet user-secrets set GitHubToken "YOUR_TOKEN_HERE"
+export OPENAI_API_KEY="<your-openai-api-key>"
 ```
 
 ### Port Conflicts

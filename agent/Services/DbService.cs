@@ -96,7 +96,6 @@ public class DbService(FormFillingDbContext db)
                 Fields = f.Fields,
                 CreatedAt = f.CreatedAt,
                 UpdatedAt = f.UpdatedAt,
-                Embedding = f.Embedding,
                 Count = f.Submissions.Count,
             })
             .ToListAsync();
