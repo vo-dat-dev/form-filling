@@ -115,7 +115,7 @@ export function ThreadsDrawer({ agentId = "minerU" }: ThreadsDrawerProps) {
   }
 
   return (
-    <aside className="w-64 bg-white border-r border-slate-200 flex flex-col h-full">
+    <aside className="w-full bg-white border-r border-slate-200 flex flex-col h-full">
       <div className="p-3 border-b border-slate-200">
         <button
           onClick={handleNew}
@@ -131,11 +131,10 @@ export function ThreadsDrawer({ agentId = "minerU" }: ThreadsDrawerProps) {
           <div
             key={thread.id}
             onClick={() => selectThread(thread.id)}
-            className={`group flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors ${
-              activeThreadId === thread.id
+            className={`group flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors ${activeThreadId === thread.id
                 ? "bg-indigo-50 text-indigo-700 font-medium"
                 : "text-slate-600 hover:bg-slate-100"
-            }`}
+              }`}
           >
             {editId === thread.id ? (
               <form
