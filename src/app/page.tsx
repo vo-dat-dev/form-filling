@@ -348,7 +348,7 @@ function MinerUContent() {
               </div>
 
               <form onSubmit={(e) => handleSubmit(formId, e)} className="px-5 py-4 space-y-4">
-                {form.fields
+                {[...form.fields]
                   .sort((a, b) => a.order - b.order)
                   .map((field) => (
                     <FormFieldInput

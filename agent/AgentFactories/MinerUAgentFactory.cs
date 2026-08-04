@@ -200,6 +200,7 @@ public class MinerUAgentFactory : IAgentFactory
                 Id = m.Id,
                 Title = m.Title,
                 Description = m.Description,
+                Fields = ParseFormFields(m.Fields),
             }).ToList();
 
             _logger.LogInformation("search_forms returned {Count} results for query: {Query}", forms.Count, query);
@@ -218,7 +219,7 @@ public class MinerUAgentFactory : IAgentFactory
     private Task<string> FillFormAsync(
         [Description("The ID of the matching form")] string formId,
         [Description("The display title of the matched form")] string formTitle,
-        [Description("JSON object mapping each fieldId to its extracted value. For \"list\" fields (repeating group), the value must be an array of objects where each object maps sub-field IDs to their values; use [] if empty. For \"checkbox\" fields, use an array of strings; use [] if empty. For all other field types, use a string value. Example: {\"field_1\":\"John\", \"field_2\":[{\"sf_a\":\"Vietbank\",\"sf_b\":\"2020\"},{\"sf_a\":\"VNPT\",\"sf_b\":\"2022\"}], \"field_3\":[\"opt1\",\"opt2\"]}")] JsonElement filledValues,
+        [Description("JSON object mapping each fieldId to its extracted value. Use ONLY the field \"id\" values returned by search_forms (fields[].id), never invented keys. For \"list\" fields (repeating group), the value must be an array of objects where each object maps sub-field IDs to their values; use [] if empty. For \"checkbox\" fields, use an array of strings; use [] if empty. For all other field types, use a string value. Example: {\"field_1\":\"John\", \"field_2\":[{\"sf_a\":\"Vietbank\",\"sf_b\":\"2020\"},{\"sf_a\":\"VNPT\",\"sf_b\":\"2022\"}], \"field_3\":[\"opt1\",\"opt2\"]}")] JsonElement filledValues,
         CancellationToken cancellationToken = default)
     {
         if (_httpContextAccessor.HttpContext is { } ctx)
@@ -238,6 +239,20 @@ public class MinerUAgentFactory : IAgentFactory
             _logger.LogInformation("fill_form registered: formId={FormId} (total={Count})", formId, fills.Count);
         }
         return Task.FromResult($"Form fill registered for '{formTitle}'.");
+    }
+
+    private List<FormFieldDto>? ParseFormFields(string fieldsJson)
+    {
+        if (string.IsNullOrWhiteSpace(fieldsJson)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<List<FormFieldDto>>(fieldsJson, _jsonSerializerOptions);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse form fields JSON");
+            return null;
+        }
     }
 
     private static string GuessFileName(string mediaType) => mediaType switch
