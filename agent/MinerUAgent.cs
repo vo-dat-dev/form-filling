@@ -152,9 +152,6 @@ internal sealed class FormDto
     [JsonPropertyName("embedding")]
     public List<double>? Embedding { get; set; }
 
-    [JsonPropertyName("similarity")]
-    public double? Similarity { get; set; }
-
     [JsonPropertyName("fields")]
     public List<FormFieldDto>? Fields { get; set; }
 }

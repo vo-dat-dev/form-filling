@@ -1,7 +1,3 @@
-export type AgentState = {
-  proverbs: string[];
-};
-
 export type FieldType =
   | "text"
   | "number"

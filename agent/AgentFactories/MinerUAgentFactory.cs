@@ -3,6 +3,7 @@ using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Compaction;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.AI;
+using Pgvector;
 using System.ComponentModel;
 using System.Text.Json;
 
@@ -16,7 +17,8 @@ public class MinerUAgentFactory : IAgentFactory
     private readonly JsonSerializerOptions _jsonSerializerOptions;
     private readonly IChatClient _chatClient;
     private readonly ILogger _logger;
-    private readonly string _nextjsBaseUrl;
+    private readonly string _ollamaBaseUrl;
+    private readonly string _embeddingModel;
     private readonly IDocumentParserStrategy _parserStrategy;
 
     public MinerUAgentFactory(
@@ -36,10 +38,11 @@ public class MinerUAgentFactory : IAgentFactory
         _logger = loggerFactory.CreateLogger<MinerUAgentFactory>();
         _parserStrategy = parserStrategy;
 
-        _nextjsBaseUrl = Environment.GetEnvironmentVariable("NEXTJS_URL") ?? _configuration["NEXTJS_URL"] ?? "http://localhost:3000";
+        _ollamaBaseUrl = Environment.GetEnvironmentVariable("OLLAMA_BASE_URL") ?? _configuration["OLLAMA_BASE_URL"] ?? "http://localhost:11434";
+        _embeddingModel = Environment.GetEnvironmentVariable("EMBEDDING_MODEL") ?? _configuration["EMBEDDING_MODEL"] ?? "bge-m3";
 
         _logger.LogInformation("Document parser strategy: {Strategy}", _parserStrategy.GetType().Name);
-        _logger.LogInformation("Next.js URL: {Url}", _nextjsBaseUrl);
+        _logger.LogInformation("Embedding service: {EmbeddingModel} at {OllamaUrl}", _embeddingModel, _ollamaBaseUrl);
     }
 
     public AIAgent CreateAgent()
@@ -70,9 +73,9 @@ public class MinerUAgentFactory : IAgentFactory
                         3. Analyze the extracted content. Identify ALL form types that match the document content
                            (e.g., "citizen ID card", "land use certificate", "job application", etc.).
                            Formulate a BROAD search query that covers all identified form types.
-                        4. Call search_forms ONCE with that broad query — returns forms sorted by relevance with similarity score.
-                           - If results are empty or all low similarity (< 0.5), retry once with a different query.
-                        5. For EVERY form in the search results with similarity > 0.65 (good match):
+                        4. Call search_forms ONCE with that broad query — returns forms sorted by relevance.
+                           - If results are empty, retry once with a different query.
+                        5. For EVERY form in the search results (they are sorted by relevance, best match first):
                            - Match the extracted content to the form's fields.
                            - Call fill_form for that form with the matched values.
                            - You may call fill_form MULTIPLE times, once per matching form.
@@ -137,7 +140,7 @@ public class MinerUAgentFactory : IAgentFactory
         return text.Length <= 3000 ? text : text[..3000] + "\n\n[truncated]";
     }
 
-    [Description("Search forms by semantic similarity. Analyze the parsed document, then call this with a query describing the form type needed. Returns forms sorted by relevance with a similarity score.")]
+    [Description("Search forms by semantic similarity. Analyze the parsed document, then call this with a query describing the form type needed. Returns forms sorted by relevance.")]
     private async Task<List<FormDto>> SearchFormsAsync(
         [Description("Search query describing the type of form needed, based on the document content")] string query,
         CancellationToken cancellationToken = default)
@@ -154,11 +157,51 @@ public class MinerUAgentFactory : IAgentFactory
 
         try
         {
+            // Generate embedding for the query (Ollama) directly in the backend
             using var client = _httpClientFactory.CreateClient();
-            var encoded = Uri.EscapeDataString(query);
-            var json = await client.GetStringAsync($"{_nextjsBaseUrl}/api/forms?q={encoded}", cancellationToken);
-            var forms = JsonSerializer.Deserialize<List<FormDto>>(json) ?? [];
-            forms.ForEach(f => f.Embedding = null); // strip embeddings before sending to LLM
+            var payload = new { model = _embeddingModel, input = query };
+            using var content = new StringContent(
+                JsonSerializer.Serialize(payload),
+                System.Text.Encoding.UTF8,
+                "application/json");
+
+            var res = await client.PostAsync($"{_ollamaBaseUrl}/api/embed", content, cancellationToken);
+            if (!res.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Embedding request failed: {Status}", (int)res.StatusCode);
+                return [];
+            }
+
+            using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync(cancellationToken));
+            if (!doc.RootElement.TryGetProperty("embeddings", out var embeddings) ||
+                embeddings.ValueKind != JsonValueKind.Array ||
+                embeddings.GetArrayLength() == 0)
+            {
+                _logger.LogWarning("Embedding response has unexpected format");
+                return [];
+            }
+
+            var values = new List<float>();
+            foreach (var v in embeddings[0].EnumerateArray())
+                values.Add(v.GetSingle());
+            var queryVector = new Vector(new ReadOnlyMemory<float>(values.ToArray()));
+
+            // Search the DB directly — no round-trip through the Next.js frontend
+            var db = _httpContextAccessor.HttpContext?.RequestServices.GetRequiredService<DbService>();
+            if (db is null)
+            {
+                _logger.LogWarning("search_forms skipped — no active HTTP context");
+                return [];
+            }
+
+            var matches = await db.ListForms(queryVector);
+            var forms = matches.Select(m => new FormDto
+            {
+                Id = m.Id,
+                Title = m.Title,
+                Description = m.Description,
+            }).ToList();
+
             _logger.LogInformation("search_forms returned {Count} results for query: {Query}", forms.Count, query);
             if (_httpContextAccessor.HttpContext is { } c)
                 c.Items["__forms_cache__"] = forms;
@@ -166,7 +209,7 @@ public class MinerUAgentFactory : IAgentFactory
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to search forms from {Url}", _nextjsBaseUrl);
+            _logger.LogWarning(ex, "Failed to search forms for query: {Query}", query);
             return [];
         }
     }

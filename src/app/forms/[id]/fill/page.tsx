@@ -153,7 +153,7 @@ export default function FillFormPage({
 
       <main className="max-w-2xl mx-auto px-6 py-8">
         <form onSubmit={handleSubmit} className="space-y-5">
-          {form.fields
+          {[...form.fields]
             .sort((a, b) => a.order - b.order)
             .map((field) => (
               <FormFieldInput

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Pgvector;
 
 public class FormFillingDbContext : DbContext
 {
@@ -10,6 +11,8 @@ public class FormFillingDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.HasPostgresExtension("vector");
+
         modelBuilder.Entity<ThreadEf>(e =>
         {
             e.ToTable("Thread");
@@ -68,7 +71,7 @@ public class FormEf
     public string Title { get; set; } = "";
     public string? Description { get; set; }
     public string Fields { get; set; } = "[]";
-    public string? Embedding { get; set; }
+    public Vector? Embedding { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public List<FormSubmissionEf> Submissions { get; set; } = [];

@@ -108,7 +108,7 @@ function MinerUToolCallCard({
 
   const formsResult =
     status === "complete" && name === "search_forms" && Array.isArray(result)
-      ? (result as Array<Record<string, unknown>>).filter((f) => (f.similarity as number) > 0.5)
+      ? (result as Array<Record<string, unknown>>)
       : null;
 
   const formTitle =
@@ -142,7 +142,6 @@ function MinerUToolCallCard({
           {formsResult.map((f, i) => {
             const title = f.title as string;
             const desc = f.description as string | undefined;
-            const sim = f.similarity as number | undefined;
             return (
               <div key={i} className="flex items-center justify-between text-xs bg-white rounded px-2 py-1.5 border border-slate-200">
                 <div className="min-w-0">
@@ -151,11 +150,6 @@ function MinerUToolCallCard({
                     <span className="text-slate-400 ml-1">— {desc.slice(0, 50)}</span>
                   )}
                 </div>
-                {sim != null && (
-                  <span className={`shrink-0 ml-2 font-mono ${sim > 0.7 ? "text-green-600" : "text-amber-600"}`}>
-                    {sim.toFixed(2)}
-                  </span>
-                )}
               </div>
             );
           })}

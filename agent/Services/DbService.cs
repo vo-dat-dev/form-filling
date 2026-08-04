@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Pgvector;
+using Pgvector.EntityFrameworkCore;
 using System.Text.Json.Serialization;
 
 public class DbService(FormFillingDbContext db)
@@ -65,25 +67,32 @@ public class DbService(FormFillingDbContext db)
 
     // ---- Forms ----
 
-    public async Task<List<FormInfo>> ListForms(string? searchEmbedding = null)
+    public async Task<List<FormInfo>> ListForms(Vector? searchVector = null)
     {
-        if (searchEmbedding != null)
+        if (searchVector != null)
         {
-            var results = await db.Database.SqlQueryRaw<FormWithSimilarity>(
-                """
-                SELECT f.id, f.title, f.description, f.fields::text,
-                       f."createdAt" AS "CreatedAt", f."updatedAt" AS "UpdatedAt",
-                       f.embedding::text AS "Embedding",
-                       (SELECT COUNT(*)::int FROM "FormSubmission" fs WHERE fs."formId" = f.id) AS "SubmissionCount",
-                       1 - (f.embedding <=> $1::vector) AS "Similarity"
-                FROM "Form" f
-                WHERE f.embedding IS NOT NULL
-                ORDER BY f.embedding <=> $1::vector
-                LIMIT 10
-                """,
-                [searchEmbedding]
-            ).ToListAsync();
-            return results.Select(MapFormRaw).ToList();
+            return await db.Forms
+                .Where(f => f.Embedding != null)
+                .Select(f => new
+                {
+                    Form = f,
+                    Distance = f.Embedding!.L2Distance(searchVector),
+                    Count = f.Submissions.Count,
+                })
+                .OrderBy(x => x.Distance)
+                .Take(10)
+                .Select(x => new FormInfo
+                {
+                    Id = x.Form.Id,
+                    Title = x.Form.Title,
+                    Description = x.Form.Description,
+                    Fields = x.Form.Fields,
+                    CreatedAt = x.Form.CreatedAt,
+                    UpdatedAt = x.Form.UpdatedAt,
+                    Embedding = x.Form.Embedding != null ? x.Form.Embedding.ToString() : null,
+                    Count = x.Count,
+                })
+                .ToListAsync();
         }
 
         var all = await db.Forms
@@ -114,32 +123,24 @@ public class DbService(FormFillingDbContext db)
                 Fields = f.Fields,
                 CreatedAt = f.CreatedAt,
                 UpdatedAt = f.UpdatedAt,
-                Embedding = f.Embedding,
+                Embedding = f.Embedding != null ? f.Embedding.ToString() : null,
                 Count = f.Submissions.Count,
             })
             .FirstOrDefaultAsync();
         return form;
     }
 
-    public async Task<FormInfo?> CreateForm(string title, string? description, string fields, string? embedding)
+    public async Task<FormInfo?> CreateForm(string title, string? description, string fields, Vector? embedding)
     {
         var entity = new FormEf
         {
             Title = title,
             Description = description,
             Fields = fields,
+            Embedding = embedding,
         };
         db.Forms.Add(entity);
         await db.SaveChangesAsync();
-
-        if (embedding != null)
-        {
-            await db.Database.ExecuteSqlRawAsync(
-                """UPDATE "Form" SET embedding = $1::vector WHERE id = $2""",
-                embedding, entity.Id);
-        }
-
-        entity.Embedding = embedding;
 
         return new FormInfo
         {
@@ -149,11 +150,11 @@ public class DbService(FormFillingDbContext db)
             Fields = entity.Fields,
             CreatedAt = entity.CreatedAt,
             UpdatedAt = entity.UpdatedAt,
-            Embedding = entity.Embedding,
+            Embedding = entity.Embedding?.ToString(),
         };
     }
 
-    public async Task<FormInfo?> UpdateForm(string id, string title, string? description, string fields, string? newEmbedding)
+    public async Task<FormInfo?> UpdateForm(string id, string title, string? description, string fields, Vector? newEmbedding, bool descriptionChanged)
     {
         var entity = await db.Forms.FindAsync(id);
         if (entity == null) return null;
@@ -163,21 +164,12 @@ public class DbService(FormFillingDbContext db)
         entity.Fields = fields;
         entity.UpdatedAt = DateTime.UtcNow;
 
-        if (newEmbedding != null && newEmbedding.Length > 0)
-        {
-            await db.Database.ExecuteSqlRawAsync(
-                """UPDATE "Form" SET embedding = $1::vector WHERE id = $2""",
-                newEmbedding, id);
-        }
-        else if (newEmbedding != null)
-        {
-            await db.Database.ExecuteSqlRawAsync(
-                """UPDATE "Form" SET embedding = NULL WHERE id = $1""", id);
-        }
+        if (descriptionChanged)
+            entity.Embedding = newEmbedding;
 
         await db.SaveChangesAsync();
 
-        var embedding = newEmbedding ?? await GetFormEmbedding(id);
+        var embedding = descriptionChanged ? newEmbedding?.ToString() : await GetFormEmbedding(id);
         return new FormInfo
         {
             Id = entity.Id,
@@ -275,34 +267,6 @@ public class DbService(FormFillingDbContext db)
         CreatedAt = e.CreatedAt,
         UpdatedAt = e.UpdatedAt,
     };
-
-    private static FormInfo MapFormRaw(FormWithSimilarity r) => new()
-    {
-        Id = r.Id,
-        Title = r.Title,
-        Description = r.Description,
-        Fields = r.Fields,
-        CreatedAt = r.CreatedAt,
-        UpdatedAt = r.UpdatedAt,
-        Embedding = r.Embedding,
-        Count = r.SubmissionCount,
-        Similarity = r.Similarity,
-    };
-}
-
-// ---- Raw SQL result for vector search ----
-
-public class FormWithSimilarity
-{
-    public string Id { get; set; } = "";
-    public string Title { get; set; } = "";
-    public string? Description { get; set; }
-    public string Fields { get; set; } = "";
-    public DateTime CreatedAt { get; set; }
-    public DateTime UpdatedAt { get; set; }
-    public string? Embedding { get; set; }
-    public int SubmissionCount { get; set; }
-    public double? Similarity { get; set; }
 }
 
 // ---- DTOs ----
@@ -326,7 +290,6 @@ public class FormInfo
     public DateTime UpdatedAt { get; set; }
     public string? Embedding { get; set; }
     public int Count { get; set; }
-    public double? Similarity { get; set; }
 }
 
 public class SubmissionInfo

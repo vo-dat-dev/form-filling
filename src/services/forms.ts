@@ -1,30 +1,27 @@
 import { request } from "./http";
+import type { FormField } from "@/lib/types";
 
 export interface Form {
   id: string;
   title: string;
   description: string | null;
-  fields: string;
+  fields: FormField[];
   embedding?: string | null;
   createdAt: string;
   updatedAt: string;
   count?: number;
-  similarity?: number | null;
 }
 
 export interface CreateFormParams {
   title: string;
   description?: string;
   fields: string;
-  embedding?: string;
 }
 
 export interface UpdateFormParams {
   title: string;
   description?: string;
   fields: string;
-  embedding?: string;
-  descriptionChanged?: boolean;
 }
 
 export const formsService = {

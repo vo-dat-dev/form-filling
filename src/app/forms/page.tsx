@@ -11,7 +11,6 @@ interface FormListItem {
   title: string;
   description: string | null;
   embedding: number[] | null;
-  similarity: number | null;
   createdAt: string;
   updatedAt: string;
   count: number;

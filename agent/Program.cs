@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
+using Pgvector;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -44,15 +45,16 @@ static string ToNpgsqlConnString(string? url)
 var rawConn = Environment.GetEnvironmentVariable("DATABASE_URL");
 var connString = ToNpgsqlConnString(rawConn);
 builder.Services.AddDbContext<FormFillingDbContext>(options =>
-    options.UseNpgsql(connString));
+    options.UseNpgsql(connString, npgsql => npgsql.UseVector()));
 builder.Services.AddScoped<DbService>();
+builder.Services.AddSingleton<EmbeddingService>();
 
 // Expose the configured JsonSerializerOptions so factories can inject it
 builder.Services.AddSingleton(sp =>
     sp.GetRequiredService<IOptions<JsonOptions>>().Value.SerializerOptions);
 
 // Register document parser strategy (Strategy pattern)
-var parserStrategy = Environment.GetEnvironmentVariable("DOCUMENT_PARSER_STRATEGY") ?? "ocr";
+var parserStrategy = Environment.GetEnvironmentVariable("DOCUMENT_PARSER_STRATEGY") ?? "resocr";
 switch (parserStrategy.ToLowerInvariant())
 {
     case "ocr":
@@ -62,6 +64,17 @@ switch (parserStrategy.ToLowerInvariant())
                 sp.GetRequiredService<IHttpClientFactory>(),
                 sp.GetRequiredService<ILoggerFactory>().CreateLogger("OcrServiceParserStrategy"),
                 ocrUrl));
+        break;
+
+    case "resocr":
+        var resOcrUrl = Environment.GetEnvironmentVariable("RESOCR_URL") ?? "http://localhost:8001";
+        var resOcrLang = Environment.GetEnvironmentVariable("RESOCR_LANG") ?? "vi";
+        builder.Services.AddSingleton<IDocumentParserStrategy>(sp =>
+            new ResOcrParserStrategy(
+                sp.GetRequiredService<IHttpClientFactory>(),
+                sp.GetRequiredService<ILoggerFactory>().CreateLogger("ResOcrParserStrategy"),
+                resOcrUrl,
+                resOcrLang));
         break;
 
     default: // "mineru"
@@ -83,7 +96,6 @@ switch (parserStrategy.ToLowerInvariant())
 }
 
 // Register agent factories — DI injects all dependencies automatically
-builder.Services.AddSingleton<IAgentFactory, ProverbsAgentFactory>();
 builder.Services.AddSingleton<IAgentFactory, MinerUAgentFactory>();
 
 WebApplication app = builder.Build();
@@ -159,7 +171,7 @@ api.MapDelete("/threads/{id}", async (DbService db, string id) =>
 api.MapGet("/forms", async (DbService db, string? q) =>
 {
     if (!string.IsNullOrWhiteSpace(q))
-        return Results.Ok(await db.ListForms(q));
+        return Results.Ok(await db.ListForms(ParseVector(q)));
     return Results.Ok(await db.ListForms());
 });
 
@@ -169,25 +181,24 @@ api.MapGet("/forms/{id}", async (DbService db, string id) =>
     return form != null ? Results.Ok(form) : Results.NotFound();
 });
 
-api.MapPost("/forms", async (DbService db, CreateFormRequest body) =>
+api.MapPost("/forms", async (DbService db, EmbeddingService embeddings, CreateFormRequest body) =>
 {
-    var form = await db.CreateForm(body.Title, body.Description, body.Fields, body.Embedding);
+    var embedding = await embeddings.EmbedAsync(body.Description);
+    var form = await db.CreateForm(body.Title, body.Description, body.Fields, embedding);
     return Results.Ok(form);
 });
 
-api.MapPut("/forms/{id}", async (DbService db, string id, UpdateFormRequest body) =>
+api.MapPut("/forms/{id}", async (DbService db, EmbeddingService embeddings, string id, UpdateFormRequest body) =>
 {
     var existing = await db.GetForm(id);
     if (existing == null) return Results.NotFound();
 
-    string? newEmbedding = body.Embedding switch
-    {
-        null when body.DescriptionChanged => "",
-        not null => body.Embedding,
-        _ => null,
-    };
+    var descriptionChanged = body.Description != existing.Description;
+    var newEmbedding = descriptionChanged
+        ? await embeddings.EmbedAsync(body.Description)
+        : null;
 
-    var form = await db.UpdateForm(id, body.Title, body.Description, body.Fields, newEmbedding);
+    var form = await db.UpdateForm(id, body.Title, body.Description, body.Fields, newEmbedding, descriptionChanged);
     return form != null ? Results.Ok(form) : Results.NotFound();
 });
 
@@ -219,18 +230,24 @@ foreach (var factory in app.Services.GetServices<IAgentFactory>())
 
 await app.RunAsync();
 
-public partial class Program { }
+public partial class Program
+{
+    internal static Vector? ParseVector(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return null;
+        try { return new Vector(s); }
+        catch { return null; }
+    }
+}
 
 // ---- Request DTOs ----
 
 public record CreateThreadRequest(string? AgentId, string? Title);
 public record UpdateThreadRequest(string? Title, string? Metadata);
-public record CreateFormRequest(string Title, string? Description, string Fields, string? Embedding);
-public record UpdateFormRequest(string Title, string? Description, string Fields, string? Embedding, bool DescriptionChanged = false);
+public record CreateFormRequest(string Title, string? Description, string Fields);
+public record UpdateFormRequest(string Title, string? Description, string Fields);
 
 // Serializer context covering types from all agent factories
-[JsonSerializable(typeof(ProverbsStateSnapshot))]
-[JsonSerializable(typeof(WeatherInfo))]
 [JsonSerializable(typeof(List<FormDto>))]
 [JsonSerializable(typeof(FormDto))]
 [JsonSerializable(typeof(MinerUFormFillList))]
