@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { submissionsApi } from "@/lib/api-client";
+import { submissionsService } from "@/services";
 
 export async function GET(
   _request: NextRequest,
@@ -7,7 +7,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const submission = await submissionsApi.get(id);
+    const submission = await submissionsService.get(id);
     if (!submission) {
       return NextResponse.json({ error: "Submission not found" }, { status: 404 });
     }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { formsApi } from "@/lib/api-client";
+import { formsService } from "@/services";
 import type { FormConfig } from "@/lib/types";
 import { generateEmbedding } from "@/lib/embedding";
 
@@ -9,7 +9,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const form = await formsApi.get(id);
+    const form = await formsService.get(id);
     if (!form) {
       return NextResponse.json({ error: "Form not found" }, { status: 404 });
     }
@@ -28,7 +28,7 @@ export async function PUT(
     const { id } = await params;
     const body = (await request.json()) as FormConfig & { existingDescription?: string; descriptionChanged?: boolean };
 
-    const existing = await formsApi.get(id);
+    const existing = await formsService.get(id);
     if (!existing) {
       return NextResponse.json({ error: "Form not found" }, { status: 404 });
     }
@@ -42,7 +42,7 @@ export async function PUT(
         : null;
     }
 
-    const form = await formsApi.update(id, {
+    const form = await formsService.update(id, {
       title: body.title,
       description: body.description ?? undefined,
       fields: JSON.stringify(body.fields),
@@ -65,7 +65,7 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    await formsApi.delete(id);
+    await formsService.delete(id);
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Failed to delete form:", error);

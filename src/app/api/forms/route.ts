@@ -1,23 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { formsApi } from "@/lib/api-client";
+import { formsService } from "@/services";
 import type { FormConfig } from "@/lib/types";
 import { generateEmbedding } from "@/lib/embedding";
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
-    const q = request.nextUrl.searchParams.get("q");
-
-    if (q?.trim()) {
-      const embedding = await generateEmbedding(q);
-      if (!embedding) {
-        return NextResponse.json({ error: "Failed to generate embedding for search" }, { status: 500 });
-      }
-      const embeddingStr = `[${embedding.join(",")}]`;
-      const forms = await formsApi.list(embeddingStr);
-      return NextResponse.json(forms);
-    }
-
-    const forms = await formsApi.list();
+    const forms = await formsService.list();
     return NextResponse.json(forms);
   } catch (error) {
     console.error("Failed to fetch forms:", error);
@@ -39,7 +27,7 @@ export async function POST(request: NextRequest) {
       ? await generateEmbedding(body.description)
       : null;
 
-    const form = await formsApi.create({
+    const form = await formsService.create({
       title: body.title,
       description: body.description ?? undefined,
       fields: JSON.stringify(body.fields),

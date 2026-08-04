@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { threadsApi } from "@/lib/api-client";
+import { threadsService } from "@/services";
 
 export async function PATCH(
   request: NextRequest,
@@ -8,7 +8,7 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json();
-    const thread = await threadsApi.update(id, {
+    const thread = await threadsService.update(id, {
       title: body.title,
       metadata: body.metadata ?? undefined,
     });
@@ -25,7 +25,7 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    await threadsApi.delete(id);
+    await threadsService.delete(id);
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Failed to delete thread:", error);

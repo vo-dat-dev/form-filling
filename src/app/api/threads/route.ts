@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { threadsApi } from "@/lib/api-client";
+import { threadsService } from "@/services";
 
 export async function GET(request: NextRequest) {
   try {
     const agentId = request.nextUrl.searchParams.get("agentId") ?? "minerU";
-    const threads = await threadsApi.list(agentId);
+    const threads = await threadsService.list(agentId);
     return NextResponse.json(threads);
   } catch (error) {
     console.error("Failed to fetch threads:", error);
@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const thread = await threadsApi.create({
+    const thread = await threadsService.create({
       agentId: body.agentId ?? "minerU",
       title: body.title ?? "New Conversation",
     });
