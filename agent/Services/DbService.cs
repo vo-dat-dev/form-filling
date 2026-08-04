@@ -257,6 +257,67 @@ public class DbService(FormFillingDbContext db)
         return submission;
     }
 
+    // ---- Documents & chunks ----
+
+    /// <summary>
+    /// Persists a parsed document plus its parent/child chunks.
+    /// parents[i] and children[j].ParentIndex maps children to parents (index into
+    /// parents, -1 when the child needs no parent).
+    /// </summary>
+    public async Task<DocumentInfo?> CreateDocumentAsync(
+        string fileName, string? mediaType, string content,
+        List<ChunkDraft> parents, List<ChunkDraft> children)
+    {
+        var doc = new DocumentEf { FileName = fileName, MediaType = mediaType, Content = content };
+
+        var parentEntities = parents.Select((p, i) => new DocumentChunkEf
+        {
+            DocumentId = doc.Id,
+            Content = p.Content,
+            Seq = p.Seq,
+            StartAt = p.StartAt,
+            EndAt = p.EndAt,
+            ChunkType = p.ChunkType,
+            Embedding = p.Embedding,
+        }).ToList();
+
+        var childEntities = new List<DocumentChunkEf>(children.Count);
+        for (var i = 0; i < children.Count; i++)
+        {
+            var c = children[i];
+            var parentChunkId = c.ParentIndex >= 0 && c.ParentIndex < parentEntities.Count
+                ? parentEntities[c.ParentIndex].Id
+                : null;
+            childEntities.Add(new DocumentChunkEf
+            {
+                DocumentId = doc.Id,
+                Content = c.Content,
+                Seq = c.Seq,
+                StartAt = c.StartAt,
+                EndAt = c.EndAt,
+                ChunkType = c.ChunkType,
+                ParentChunkId = parentChunkId,
+                Embedding = c.Embedding,
+            });
+        }
+
+        doc.Chunks.AddRange(parentEntities);
+        doc.Chunks.AddRange(childEntities);
+        db.Documents.Add(doc);
+        await db.SaveChangesAsync();
+
+        return new DocumentInfo
+        {
+            Id = doc.Id,
+            FileName = doc.FileName,
+            MediaType = doc.MediaType,
+            CreatedAt = doc.CreatedAt,
+            UpdatedAt = doc.UpdatedAt,
+            ParentChunkCount = parentEntities.Count,
+            ChildChunkCount = childEntities.Count,
+        };
+    }
+
     // ---- Helpers ----
 
     private static ThreadInfo MapThread(ThreadEf e) => new()
@@ -301,10 +362,39 @@ public class SubmissionInfo
     public FormInfo? Form { get; set; }
 }
 
+public class DocumentInfo
+{
+    public string Id { get; set; } = "";
+    public string FileName { get; set; } = "";
+    public string? MediaType { get; set; }
+    public string Content { get; set; } = "";
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public int ParentChunkCount { get; set; }
+    public int ChildChunkCount { get; set; }
+}
+
+/// <summary>Chunk data awaiting persistence (parents and children use the same shape).</summary>
+public class ChunkDraft
+{
+    public string Content { get; set; } = "";
+    public int Seq { get; set; }
+    public int StartAt { get; set; }
+    public int EndAt { get; set; }
+    public string ChunkType { get; set; } = "text";
+    public Vector? Embedding { get; set; }
+    /// <summary>Index into the parents list; -1 when no parent applies.</summary>
+    public int ParentIndex { get; set; } = -1;
+}
+
 [JsonSerializable(typeof(ThreadInfo))]
 [JsonSerializable(typeof(List<ThreadInfo>))]
 [JsonSerializable(typeof(FormInfo))]
 [JsonSerializable(typeof(List<FormInfo>))]
 [JsonSerializable(typeof(SubmissionInfo))]
 [JsonSerializable(typeof(List<SubmissionInfo>))]
+[JsonSerializable(typeof(DocumentInfo))]
+[JsonSerializable(typeof(List<DocumentInfo>))]
+[JsonSerializable(typeof(ChunkDraft))]
+[JsonSerializable(typeof(List<ChunkDraft>))]
 internal sealed partial class ApiSerializerContext : JsonSerializerContext;

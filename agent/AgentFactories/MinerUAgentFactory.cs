@@ -9,58 +9,68 @@ using System.Text.Json;
 
 public class MinerUAgentFactory : IAgentFactory
 {
-    public string Route => "/minerU";
+  public string Route => "/minerU";
 
-    private readonly IConfiguration _configuration;
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IHttpContextAccessor _httpContextAccessor;
-    private readonly JsonSerializerOptions _jsonSerializerOptions;
-    private readonly IChatClient _chatClient;
-    private readonly ILogger _logger;
-    private readonly string _ollamaBaseUrl;
-    private readonly string _embeddingModel;
-    private readonly IDocumentParserStrategy _parserStrategy;
+  private readonly IConfiguration _configuration;
+  private readonly IHttpClientFactory _httpClientFactory;
+  private readonly IHttpContextAccessor _httpContextAccessor;
+  private readonly JsonSerializerOptions _jsonSerializerOptions;
+  private readonly IChatClient _chatClient;
+  private readonly ILogger _logger;
+  private readonly string _ollamaBaseUrl;
+  private readonly string _embeddingModel;
+  private readonly IDocumentParserStrategy _parserStrategy;
+  private readonly EmbeddingService _embeddings;
+  private readonly bool _chunkEnabled;
+  private readonly int _parentChunkSize;
+  private readonly int _childChunkSize;
 
-    public MinerUAgentFactory(
-        IConfiguration configuration,
-        IChatClient chatClient,
-        ILoggerFactory loggerFactory,
-        IHttpClientFactory httpClientFactory,
-        IHttpContextAccessor httpContextAccessor,
-        JsonSerializerOptions jsonSerializerOptions,
-        IDocumentParserStrategy parserStrategy)
-    {
-        _configuration = configuration;
-        _chatClient = chatClient;
-        _httpClientFactory = httpClientFactory;
-        _httpContextAccessor = httpContextAccessor;
-        _jsonSerializerOptions = jsonSerializerOptions;
-        _logger = loggerFactory.CreateLogger<MinerUAgentFactory>();
-        _parserStrategy = parserStrategy;
+  public MinerUAgentFactory(
+      IConfiguration configuration,
+      IChatClient chatClient,
+      ILoggerFactory loggerFactory,
+      IHttpClientFactory httpClientFactory,
+      IHttpContextAccessor httpContextAccessor,
+      JsonSerializerOptions jsonSerializerOptions,
+      IDocumentParserStrategy parserStrategy,
+      EmbeddingService embeddings)
+  {
+    _configuration = configuration;
+    _chatClient = chatClient;
+    _httpClientFactory = httpClientFactory;
+    _httpContextAccessor = httpContextAccessor;
+    _jsonSerializerOptions = jsonSerializerOptions;
+    _logger = loggerFactory.CreateLogger<MinerUAgentFactory>();
+    _parserStrategy = parserStrategy;
+    _embeddings = embeddings;
 
-        _ollamaBaseUrl = Environment.GetEnvironmentVariable("OLLAMA_BASE_URL") ?? _configuration["OLLAMA_BASE_URL"] ?? "http://localhost:11434";
-        _embeddingModel = Environment.GetEnvironmentVariable("EMBEDDING_MODEL") ?? _configuration["EMBEDDING_MODEL"] ?? "bge-m3";
+    _ollamaBaseUrl = Environment.GetEnvironmentVariable("OLLAMA_BASE_URL") ?? _configuration["OLLAMA_BASE_URL"] ?? "http://localhost:11434";
+    _embeddingModel = Environment.GetEnvironmentVariable("EMBEDDING_MODEL") ?? _configuration["EMBEDDING_MODEL"] ?? "bge-m3";
+    _chunkEnabled = bool.TryParse(Environment.GetEnvironmentVariable("CHUNK_ENABLED"), out var ce) ? ce : true;
+    _parentChunkSize = int.TryParse(Environment.GetEnvironmentVariable("CHUNK_PARENT_SIZE"), out var ps) && ps > 0 ? ps : 4096;
+    _childChunkSize = int.TryParse(Environment.GetEnvironmentVariable("CHUNK_CHILD_SIZE"), out var cs) && cs > 0 ? cs : 384;
 
-        _logger.LogInformation("Document parser strategy: {Strategy}", _parserStrategy.GetType().Name);
-        _logger.LogInformation("Embedding service: {EmbeddingModel} at {OllamaUrl}", _embeddingModel, _ollamaBaseUrl);
-    }
+    _logger.LogInformation("Document parser strategy: {Strategy}", _parserStrategy.GetType().Name);
+    _logger.LogInformation("Embedding service: {EmbeddingModel} at {OllamaUrl}", _embeddingModel, _ollamaBaseUrl);
+    _logger.LogInformation("Chunking enabled: {Enabled} (parent={Parent}, child={Child})", _chunkEnabled, _parentChunkSize, _childChunkSize);
+  }
 
-    public AIAgent CreateAgent()
-    {
-        var compactionPipeline = new PipelineCompactionStrategy(
-            new ToolResultCompactionStrategy(CompactionTriggers.TokensExceed(0x200)),
-            new SlidingWindowCompactionStrategy(CompactionTriggers.TurnsExceed(4)),
-            new TruncationCompactionStrategy(CompactionTriggers.TokensExceed(0x8000)));
+  public AIAgent CreateAgent()
+  {
+    var compactionPipeline = new PipelineCompactionStrategy(
+        new ToolResultCompactionStrategy(CompactionTriggers.TokensExceed(0x200)),
+        new SlidingWindowCompactionStrategy(CompactionTriggers.TurnsExceed(4)),
+        new TruncationCompactionStrategy(CompactionTriggers.TokensExceed(0x8000)));
 
-        var innerAgent = _chatClient
-            .AsBuilder()
-            .UseAIContextProviders(new CompactionProvider(compactionPipeline))
-            .BuildAIAgent(new ChatClientAgentOptions
-            {
-                Name = "MinerUAgent",
-                ChatOptions = new()
-                {
-                    Instructions = """
+    var innerAgent = _chatClient
+        .AsBuilder()
+        .UseAIContextProviders(new CompactionProvider(compactionPipeline))
+        .BuildAIAgent(new ChatClientAgentOptions
+        {
+          Name = "MinerUAgent",
+          ChatOptions = new()
+          {
+            Instructions = """
                         A document-processing assistant.
 
                         ONLY act on document uploads — do NOT call any tool unless the system message
@@ -87,183 +97,273 @@ public class MinerUAgentFactory : IAgentFactory
                            - Use empty array [] for list/checkbox fields whose value cannot be found.
                            - NEVER invent, guess, or fill in placeholder values.
                         """,
-                    Tools = [
-                        AIFunctionFactory.Create(ParseDocumentsAsync, options: new() { Name = "parse_documents", SerializerOptions = _jsonSerializerOptions }),
+            Tools = [
+                    AIFunctionFactory.Create(ParseDocumentsAsync, options: new() { Name = "parse_documents", SerializerOptions = _jsonSerializerOptions }),
                         AIFunctionFactory.Create(SearchFormsAsync, options: new() { Name = "search_forms", SerializerOptions = _jsonSerializerOptions }),
                         AIFunctionFactory.Create(FillFormAsync, options: new() { Name = "fill_form", SerializerOptions = _jsonSerializerOptions }),
-                    ],
-                },
-            });
+                ],
+          },
+        });
 
-        return new MinerUAgent(innerAgent, _httpContextAccessor, _logger);
+    return new MinerUAgent(innerAgent, _httpContextAccessor, _logger);
+  }
+
+  // =================
+  // Tools
+  // =================
+
+  [Description("Parse the uploaded documents using MinerU OCR and return the extracted text content.")]
+  private async Task<string> ParseDocumentsAsync(CancellationToken cancellationToken = default)
+  {
+    using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+        cancellationToken,
+        _httpContextAccessor.HttpContext?.RequestAborted ?? CancellationToken.None);
+    var ct = linkedCts.Token;
+    ct.ThrowIfCancellationRequested();
+
+    var files = _httpContextAccessor.HttpContext?.Items["__attachments__"] as List<ExtractedFile> ?? [];
+    var docFiles = files.Where(f => f.Bytes.Length > 0).ToList();
+
+    if (docFiles.Count == 0)
+      return "No documents found to parse.";
+
+    var parsed = new List<string>();
+    foreach (var file in docFiles)
+    {
+      var fileName = GuessFileName(file.MediaType);
+      _logger.LogInformation("Parsing file with {Strategy}: {MediaType}", _parserStrategy.GetType().Name, file.MediaType);
+      try
+      {
+        var result = await _parserStrategy.ParseAsync(file.Bytes, fileName, file.MediaType, ct);
+        if (result is not null)
+        {
+          parsed.Add(_chunkEnabled
+              ? await ChunkAndStoreAsync(fileName, file.MediaType, result, ct)
+              : result);
+        }
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "MinerU parsing failed for {MediaType}", file.MediaType);
+        parsed.Add($"[Parsing failed: {ex.Message}]");
+      }
     }
 
-    // =================
-    // Tools
-    // =================
+    var text = parsed.Count > 0
+        ? string.Join("\n\n---\n\n", parsed)
+        : "No content could be extracted from the documents.";
+    return text.Length <= 3000 ? text : text[..3000] + "\n\n[truncated]";
+  }
 
-    [Description("Parse the uploaded documents using MinerU OCR and return the extracted text content.")]
-    private async Task<string> ParseDocumentsAsync(CancellationToken cancellationToken = default)
+  // ── WeKnora parent-child chunking + persistence ─────────────────────────────
+
+  /// <summary>
+  /// Chunks parsed text with WeKnora's SplitTextParentChild (parent = large section,
+  /// child = embedding unit), embeds both levels with bge-m3, persists the document
+  /// and its chunks, and returns the chunked text for the LLM.
+  /// </summary>
+  private async Task<string> ChunkAndStoreAsync(string fileName, string mediaType, string text, CancellationToken ct)
+  {
+    var db = _httpContextAccessor.HttpContext?.RequestServices.GetRequiredService<DbService>();
+
+    try
     {
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
-            cancellationToken,
-            _httpContextAccessor.HttpContext?.RequestAborted ?? CancellationToken.None);
-        var ct = linkedCts.Token;
-        ct.ThrowIfCancellationRequested();
+      var childOverlap = Math.Max(0, _childChunkSize / 5);
+      var parentCfg = new WeKnora.Chunker.SplitterConfig
+      {
+        ChunkSize = _parentChunkSize,
+        ChunkOverlap = Math.Max(0, _parentChunkSize / 5),
+        Separators = ["\n\n", "\n", "。"],
+      };
+      var childCfg = new WeKnora.Chunker.SplitterConfig
+      {
+        ChunkSize = _childChunkSize,
+        ChunkOverlap = childOverlap,
+        Separators = ["\n\n", "\n", "。"],
+      };
 
-        var files = _httpContextAccessor.HttpContext?.Items["__attachments__"] as List<ExtractedFile> ?? [];
-        var docFiles = files.Where(f => f.Bytes.Length > 0).ToList();
+      var pcResult = WeKnora.Chunker.WeKnoraChunker.SplitTextParentChild(text, parentCfg, childCfg);
+      _logger.LogInformation("Split {File} into {Parents} parents + {Children} child chunks",
+          fileName, pcResult.Parents.Count, pcResult.Children.Count);
 
-        if (docFiles.Count == 0)
-            return "No documents found to parse.";
+      if (pcResult.Children.Count == 0)
+        return text;
 
-        var parsed = new List<string>();
-        foreach (var file in docFiles)
-        {
-            _logger.LogInformation("Parsing file with {Strategy}: {MediaType}", _parserStrategy.GetType().Name, file.MediaType);
-            try
-            {
-                var result = await _parserStrategy.ParseAsync(file.Bytes, GuessFileName(file.MediaType), file.MediaType, ct);
-                if (result is not null)
-                    parsed.Add(result);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "MinerU parsing failed for {MediaType}", file.MediaType);
-                parsed.Add($"[Parsing failed: {ex.Message}]");
-            }
-        }
+      var parentVectors = await _embeddings.EmbedBatchAsync(
+          pcResult.Parents.Select(p => p.EmbeddingContent()), ct);
+      var childVectors = await _embeddings.EmbedBatchAsync(
+          pcResult.Children.Select(c => c.Chunk.EmbeddingContent()), ct);
 
-        var text = parsed.Count > 0
-            ? string.Join("\n\n---\n\n", parsed)
-            : "No content could be extracted from the documents.";
-        return text.Length <= 3000 ? text : text[..3000] + "\n\n[truncated]";
+      var parentDrafts = pcResult.Parents.Select((p, i) => new ChunkDraft
+      {
+        Content = p.Content,
+        Seq = p.Seq,
+        StartAt = p.Start,
+        EndAt = p.End,
+        Embedding = parentVectors != null && i < parentVectors.Count ? parentVectors[i] : null,
+      }).ToList();
+
+      var childDrafts = pcResult.Children.Select((c, i) => new ChunkDraft
+      {
+        Content = c.Chunk.Content,
+        Seq = c.Chunk.Seq,
+        StartAt = c.Chunk.Start,
+        EndAt = c.Chunk.End,
+        ParentIndex = c.ParentIndex,
+        Embedding = childVectors != null && i < childVectors.Count ? childVectors[i] : null,
+      }).ToList();
+
+      if (db is not null)
+      {
+        var saved = await db.CreateDocumentAsync(fileName, mediaType, text, parentDrafts, childDrafts);
+        if (saved is not null)
+          _logger.LogInformation("Persisted document {Id} with {P} parent + {C} child chunks",
+              saved.Id, saved.ParentChunkCount, saved.ChildChunkCount);
+      }
+
+      // Return the chunked text so the LLM consumes the same content that was indexed.
+      return string.Join("\n\n---\n\n", childDrafts.Select(d => d.Content));
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Chunking failed for {File} — storing raw text", fileName);
+      try
+      {
+        if (db is not null)
+          await db.CreateDocumentAsync(fileName, mediaType, text, [], []);
+      }
+      catch (Exception dbEx)
+      {
+        _logger.LogWarning(dbEx, "Failed to persist raw document {File}", fileName);
+      }
+      return text;
+    }
+  }
+
+  [Description("Search forms by semantic similarity. Analyze the parsed document, then call this with a query describing the form type needed. Returns forms sorted by relevance.")]
+  private async Task<List<FormDto>> SearchFormsAsync(
+      [Description("Search query describing the type of form needed, based on the document content")] string query,
+      CancellationToken cancellationToken = default)
+  {
+    if (_httpContextAccessor.HttpContext is { } ctx)
+    {
+      if (ctx.Items.ContainsKey("__forms_searched__"))
+      {
+        _logger.LogWarning("search_forms called more than once — returning cached result");
+        return ctx.Items["__forms_cache__"] as List<FormDto> ?? [];
+      }
+      ctx.Items["__forms_searched__"] = true;
     }
 
-    [Description("Search forms by semantic similarity. Analyze the parsed document, then call this with a query describing the form type needed. Returns forms sorted by relevance.")]
-    private async Task<List<FormDto>> SearchFormsAsync(
-        [Description("Search query describing the type of form needed, based on the document content")] string query,
-        CancellationToken cancellationToken = default)
+    try
     {
-        if (_httpContextAccessor.HttpContext is { } ctx)
-        {
-            if (ctx.Items.ContainsKey("__forms_searched__"))
-            {
-                _logger.LogWarning("search_forms called more than once — returning cached result");
-                return ctx.Items["__forms_cache__"] as List<FormDto> ?? [];
-            }
-            ctx.Items["__forms_searched__"] = true;
-        }
+      // Generate embedding for the query (Ollama) directly in the backend
+      using var client = _httpClientFactory.CreateClient();
+      var payload = new { model = _embeddingModel, input = query };
+      using var content = new StringContent(
+          JsonSerializer.Serialize(payload),
+          System.Text.Encoding.UTF8,
+          "application/json");
 
-        try
-        {
-            // Generate embedding for the query (Ollama) directly in the backend
-            using var client = _httpClientFactory.CreateClient();
-            var payload = new { model = _embeddingModel, input = query };
-            using var content = new StringContent(
-                JsonSerializer.Serialize(payload),
-                System.Text.Encoding.UTF8,
-                "application/json");
+      var res = await client.PostAsync($"{_ollamaBaseUrl}/api/embed", content, cancellationToken);
+      if (!res.IsSuccessStatusCode)
+      {
+        _logger.LogWarning("Embedding request failed: {Status}", (int)res.StatusCode);
+        return [];
+      }
 
-            var res = await client.PostAsync($"{_ollamaBaseUrl}/api/embed", content, cancellationToken);
-            if (!res.IsSuccessStatusCode)
-            {
-                _logger.LogWarning("Embedding request failed: {Status}", (int)res.StatusCode);
-                return [];
-            }
+      using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync(cancellationToken));
+      if (!doc.RootElement.TryGetProperty("embeddings", out var embeddings) ||
+          embeddings.ValueKind != JsonValueKind.Array ||
+          embeddings.GetArrayLength() == 0)
+      {
+        _logger.LogWarning("Embedding response has unexpected format");
+        return [];
+      }
 
-            using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync(cancellationToken));
-            if (!doc.RootElement.TryGetProperty("embeddings", out var embeddings) ||
-                embeddings.ValueKind != JsonValueKind.Array ||
-                embeddings.GetArrayLength() == 0)
-            {
-                _logger.LogWarning("Embedding response has unexpected format");
-                return [];
-            }
+      var values = new List<float>();
+      foreach (var v in embeddings[0].EnumerateArray())
+        values.Add(v.GetSingle());
+      var queryVector = new Vector(new ReadOnlyMemory<float>(values.ToArray()));
 
-            var values = new List<float>();
-            foreach (var v in embeddings[0].EnumerateArray())
-                values.Add(v.GetSingle());
-            var queryVector = new Vector(new ReadOnlyMemory<float>(values.ToArray()));
+      // Search the DB directly — no round-trip through the Next.js frontend
+      var db = _httpContextAccessor.HttpContext?.RequestServices.GetRequiredService<DbService>();
+      if (db is null)
+      {
+        _logger.LogWarning("search_forms skipped — no active HTTP context");
+        return [];
+      }
 
-            // Search the DB directly — no round-trip through the Next.js frontend
-            var db = _httpContextAccessor.HttpContext?.RequestServices.GetRequiredService<DbService>();
-            if (db is null)
-            {
-                _logger.LogWarning("search_forms skipped — no active HTTP context");
-                return [];
-            }
+      var matches = await db.ListForms(queryVector);
+      var forms = matches.Select(m => new FormDto
+      {
+        Id = m.Id,
+        Title = m.Title,
+        Description = m.Description,
+        Fields = ParseFormFields(m.Fields),
+      }).ToList();
 
-            var matches = await db.ListForms(queryVector);
-            var forms = matches.Select(m => new FormDto
-            {
-                Id = m.Id,
-                Title = m.Title,
-                Description = m.Description,
-                Fields = ParseFormFields(m.Fields),
-            }).ToList();
-
-            _logger.LogInformation("search_forms returned {Count} results for query: {Query}", forms.Count, query);
-            if (_httpContextAccessor.HttpContext is { } c)
-                c.Items["__forms_cache__"] = forms;
-            return forms;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to search forms for query: {Query}", query);
-            return [];
-        }
+      _logger.LogInformation("search_forms returned {Count} results for query: {Query}", forms.Count, query);
+      if (_httpContextAccessor.HttpContext is { } c)
+        c.Items["__forms_cache__"] = forms;
+      return forms;
     }
-
-    [Description("Register a matched form fill result. Can be called MULTIPLE times if multiple forms match the document content.")]
-    private Task<string> FillFormAsync(
-        [Description("The ID of the matching form")] string formId,
-        [Description("The display title of the matched form")] string formTitle,
-        [Description("JSON object mapping each fieldId to its extracted value. Use ONLY the field \"id\" values returned by search_forms (fields[].id), never invented keys. For \"list\" fields (repeating group), the value must be an array of objects where each object maps sub-field IDs to their values; use [] if empty. For \"checkbox\" fields, use an array of strings; use [] if empty. For all other field types, use a string value. Example: {\"field_1\":\"John\", \"field_2\":[{\"sf_a\":\"Vietbank\",\"sf_b\":\"2020\"},{\"sf_a\":\"VNPT\",\"sf_b\":\"2022\"}], \"field_3\":[\"opt1\",\"opt2\"]}")] JsonElement filledValues,
-        CancellationToken cancellationToken = default)
+    catch (Exception ex)
     {
-        if (_httpContextAccessor.HttpContext is { } ctx)
-        {
-            var valueDict = filledValues.ValueKind == JsonValueKind.Object
-                ? filledValues.EnumerateObject().ToDictionary(p => p.Name, p => p.Value)
-                : new Dictionary<string, JsonElement>();
-
-            var fills = ctx.Items["__form_fills__"] as List<MinerUFormFill> ?? [];
-            fills.Add(new MinerUFormFill
-            {
-                FormId = formId,
-                FormTitle = formTitle,
-                FilledValues = valueDict
-            });
-            ctx.Items["__form_fills__"] = fills;
-            _logger.LogInformation("fill_form registered: formId={FormId} (total={Count})", formId, fills.Count);
-        }
-        return Task.FromResult($"Form fill registered for '{formTitle}'.");
+      _logger.LogWarning(ex, "Failed to search forms for query: {Query}", query);
+      return [];
     }
+  }
 
-    private List<FormFieldDto>? ParseFormFields(string fieldsJson)
+  [Description("Register a matched form fill result. Can be called MULTIPLE times if multiple forms match the document content.")]
+  private Task<string> FillFormAsync(
+      [Description("The ID of the matching form")] string formId,
+      [Description("The display title of the matched form")] string formTitle,
+      [Description("JSON object mapping each fieldId to its extracted value. Use ONLY the field \"id\" values returned by search_forms (fields[].id), never invented keys. For \"list\" fields (repeating group), the value must be an array of objects where each object maps sub-field IDs to their values; use [] if empty. For \"checkbox\" fields, use an array of strings; use [] if empty. For all other field types, use a string value. Example: {\"field_1\":\"John\", \"field_2\":[{\"sf_a\":\"Vietbank\",\"sf_b\":\"2020\"},{\"sf_a\":\"VNPT\",\"sf_b\":\"2022\"}], \"field_3\":[\"opt1\",\"opt2\"]}")] JsonElement filledValues,
+      CancellationToken cancellationToken = default)
+  {
+    if (_httpContextAccessor.HttpContext is { } ctx)
     {
-        if (string.IsNullOrWhiteSpace(fieldsJson)) return null;
-        try
-        {
-            return JsonSerializer.Deserialize<List<FormFieldDto>>(fieldsJson, _jsonSerializerOptions);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to parse form fields JSON");
-            return null;
-        }
+      var valueDict = filledValues.ValueKind == JsonValueKind.Object
+          ? filledValues.EnumerateObject().ToDictionary(p => p.Name, p => p.Value)
+          : new Dictionary<string, JsonElement>();
+
+      var fills = ctx.Items["__form_fills__"] as List<MinerUFormFill> ?? [];
+      fills.Add(new MinerUFormFill
+      {
+        FormId = formId,
+        FormTitle = formTitle,
+        FilledValues = valueDict
+      });
+      ctx.Items["__form_fills__"] = fills;
+      _logger.LogInformation("fill_form registered: formId={FormId} (total={Count})", formId, fills.Count);
     }
+    return Task.FromResult($"Form fill registered for '{formTitle}'.");
+  }
 
-    private static string GuessFileName(string mediaType) => mediaType switch
+  private List<FormFieldDto>? ParseFormFields(string fieldsJson)
+  {
+    if (string.IsNullOrWhiteSpace(fieldsJson)) return null;
+    try
     {
-        "application/pdf" => "document.pdf",
-        "image/png" => "image.png",
-        "image/jpeg" or "image/jpg" => "image.jpg",
-        "image/webp" => "image.webp",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => "document.docx",
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => "document.pptx",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => "document.xlsx",
-        _ => "document"
-    };
+      return JsonSerializer.Deserialize<List<FormFieldDto>>(fieldsJson, _jsonSerializerOptions);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to parse form fields JSON");
+      return null;
+    }
+  }
+
+  private static string GuessFileName(string mediaType) => mediaType switch
+  {
+    "application/pdf" => "document.pdf",
+    "image/png" => "image.png",
+    "image/jpeg" or "image/jpg" => "image.jpg",
+    "image/webp" => "image.webp",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => "document.docx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation" => "document.pptx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => "document.xlsx",
+    _ => "document"
+  };
 }

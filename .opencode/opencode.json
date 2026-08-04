@@ -3,8 +3,34 @@
   "instructions": ["CLAUDE.md", "RTK.md"],
   "lsp": true,
   "formatter": true,
+  "permission": {
+    "*": "ask",
+    "bash": "allow",
+    "edit": "deny"
+  },
   "watcher": {
     "ignore": ["node_modules/**", ".next/**", "dist/**", ".git/**", "bin/**", "obj/**"]
+  },
+  "mcp": {
+      "zread": {
+          "type": "remote",
+          "url": "https://api.z.ai/api/mcp/zread/mcp",
+          "headers": {
+              "Authorization": "Bearer 925cb3f9c86c4bc580dbef4861686366.JyhQLQMiRwzEVzcx"
+          }
+      },
+      "resource": {
+          "type": "local",
+          "command": [
+              "npx",
+              "-y",
+              "@modelcontextprotocol/server-filesystem",
+              "/Users/votiendat/WorkSpace/demo/ResOCR",
+              "/Users/votiendat/WorkSpace/demo/weknora",
+              "/"
+          ],
+          "enabled": true
+      }
   },
   "provider": {
     "ollama": {
@@ -28,12 +54,17 @@
     "omniroute": {
       "name": "OmniRoute",
       "npm": "@ai-sdk/openai-compatible",
-      "options": {
-        "baseURL": "http://45.119.84.168:20128/v1",
-        "apiKey": "sk-f7cecacb06b57f66-e85e73-7f0a55d2"
+      // "options": {
+      //   "baseURL": "http://45.119.84.168:20128/v1",
+      //   "apiKey": "sk-f7cecacb06b57f66-e85e73-7f0a55d2"
+      // },
+       "options": {
+        "baseURL": "http://localhost:20128/v1",
+        "apiKey": "sk-162ebc57bd769f08-cedfe0-7fa3464a"
       },
+ 
       "models": {
-        "oc/deepseek-v4-flash-free": { "name": "oc/deepseek-v4-flash-free" },
+        "oc/deepseek-v4-flash-free": { "name": "oc/deepseek-v4-flash-free" }
       }
     } 
   }
