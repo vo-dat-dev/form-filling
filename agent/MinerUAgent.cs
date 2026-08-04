@@ -188,3 +188,24 @@ internal sealed class FieldOptionDto
     [JsonPropertyName("value")]
     public string Value { get; set; } = "";
 }
+
+internal sealed class KnowledgeChunkDto
+{
+    [JsonPropertyName("chunkId")]
+    public string ChunkId { get; set; } = "";
+
+    [JsonPropertyName("documentId")]
+    public string DocumentId { get; set; } = "";
+
+    [JsonPropertyName("content")]
+    public string Content { get; set; } = "";
+
+    [JsonPropertyName("chunkType")]
+    public string ChunkType { get; set; } = "text";
+
+    [JsonPropertyName("distance")]
+    public double Distance { get; set; }
+
+    [JsonPropertyName("fileName")]
+    public string? FileName { get; set; }
+}

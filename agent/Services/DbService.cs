@@ -257,6 +257,36 @@ public class DbService(FormFillingDbContext db)
         return submission;
     }
 
+    // ---- Knowledge Search ----
+
+    /// <summary>
+    /// Search document chunks by semantic similarity using vector embedding.
+    /// Returns the most relevant chunks ordered by L2 distance.
+    /// </summary>
+    public async Task<List<KnowledgeChunkInfo>> SearchKnowledge(Vector queryVector, int limit = 5)
+    {
+        var results = await db.DocumentChunks
+            .Where(c => c.Embedding != null)
+            .Select(c => new
+            {
+                Chunk = c,
+                Distance = c.Embedding!.L2Distance(queryVector),
+            })
+            .OrderBy(x => x.Distance)
+            .Take(limit)
+            .Select(x => new KnowledgeChunkInfo
+            {
+                ChunkId = x.Chunk.Id,
+                DocumentId = x.Chunk.DocumentId,
+                Content = x.Chunk.Content,
+                ChunkType = x.Chunk.ChunkType,
+                Distance = x.Distance,
+                FileName = x.Chunk.Document != null ? x.Chunk.Document.FileName : null,
+            })
+            .ToListAsync();
+        return results;
+    }
+
     // ---- Documents & chunks ----
 
     /// <summary>
@@ -387,6 +417,16 @@ public class ChunkDraft
     public int ParentIndex { get; set; } = -1;
 }
 
+public class KnowledgeChunkInfo
+{
+    public string ChunkId { get; set; } = "";
+    public string DocumentId { get; set; } = "";
+    public string Content { get; set; } = "";
+    public string ChunkType { get; set; } = "text";
+    public double Distance { get; set; }
+    public string? FileName { get; set; }
+}
+
 [JsonSerializable(typeof(ThreadInfo))]
 [JsonSerializable(typeof(List<ThreadInfo>))]
 [JsonSerializable(typeof(FormInfo))]
@@ -397,4 +437,6 @@ public class ChunkDraft
 [JsonSerializable(typeof(List<DocumentInfo>))]
 [JsonSerializable(typeof(ChunkDraft))]
 [JsonSerializable(typeof(List<ChunkDraft>))]
+[JsonSerializable(typeof(KnowledgeChunkInfo))]
+[JsonSerializable(typeof(List<KnowledgeChunkInfo>))]
 internal sealed partial class ApiSerializerContext : JsonSerializerContext;

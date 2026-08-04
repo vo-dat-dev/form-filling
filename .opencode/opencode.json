@@ -64,7 +64,8 @@
       },
  
       "models": {
-        "oc/deepseek-v4-flash-free": { "name": "oc/deepseek-v4-flash-free" }
+        "oc/deepseek-v4-flash-free": { "name": "oc/deepseek-v4-flash-free" },
+        "cc/claude-sonnet-4-5-20250929": { "name": "cc/claude-sonnet-4-5-20250929" },
       }
     } 
   }

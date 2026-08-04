@@ -1,8 +1,8 @@
+using OllamaSharp;
+using OllamaSharp.Models;
 using Pgvector;
-using System.Text.Json;
 
 public class EmbeddingService(
-    IHttpClientFactory httpClientFactory,
     IConfiguration configuration,
     ILogger<EmbeddingService> logger)
 {
@@ -14,6 +14,13 @@ public class EmbeddingService(
         ?? configuration["EMBEDDING_MODEL"]
         ?? "bge-m3";
 
+    private OllamaApiClient GetClient()
+    {
+        var client = new OllamaApiClient(new Uri(_ollamaBaseUrl));
+        client.SelectedModel = _embeddingModel;
+        return client;
+    }
+
     public async Task<Vector?> EmbedAsync(string? text, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(text)) return null;
@@ -22,47 +29,41 @@ public class EmbeddingService(
     }
 
     /// <summary>
-    /// Embeds a batch of texts in a single Ollama /api/embed call (model bge-m3,
-    /// 1024 dims). Returns a Vector per input aligned by index; entries for empty
-    /// inputs are null.
+    /// Embeds a batch of texts using OllamaSharp (model bge-m3, 1024 dims).
+    /// Returns a Vector per input aligned by index; entries for empty inputs are null.
     /// </summary>
     public async Task<List<Vector>?> EmbedBatchAsync(IEnumerable<string> texts, CancellationToken ct = default)
     {
         var items = texts.Select(t => t?.Trim() ?? "").ToList();
         if (items.Count == 0 || items.All(string.IsNullOrEmpty)) return null;
 
-        var payload = new { model = _embeddingModel, input = items };
         try
         {
-            using var client = httpClientFactory.CreateClient();
-            using var content = new StringContent(
-                JsonSerializer.Serialize(payload),
-                System.Text.Encoding.UTF8,
-                "application/json");
-
-            var res = await client.PostAsync($"{_ollamaBaseUrl}/api/embed", content, ct);
-            if (!res.IsSuccessStatusCode)
+            var ollama = GetClient();
+            var request = new EmbedRequest
             {
-                logger.LogWarning("Batch embedding request failed: {Status}", (int)res.StatusCode);
+                Model = _embeddingModel,
+                Input = [.. items]
+            };
+
+            var response = await ollama.EmbedAsync(request, ct);
+            if (response?.Embeddings == null || response.Embeddings.Count == 0)
+            {
+                logger.LogWarning("Embedding response is empty");
                 return null;
             }
 
-            using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync(ct));
-            if (!doc.RootElement.TryGetProperty("embeddings", out var embeddings) ||
-                embeddings.ValueKind != JsonValueKind.Array)
+            var vectors = new List<Vector?>();
+            foreach (var embedding in response.Embeddings)
             {
-                logger.LogWarning("Batch embedding response has unexpected format");
-                return null;
-            }
-
-            var vectors = new List<Vector?>(items.Count);
-            foreach (var vec in embeddings.EnumerateArray())
-            {
-                var values = new float[vec.GetArrayLength()];
-                var i = 0;
-                foreach (var v in vec.EnumerateArray())
-                    values[i++] = v.GetSingle();
-                vectors.Add(new Vector(new ReadOnlyMemory<float>(values)));
+                if (embedding != null && embedding.Length > 0)
+                {
+                    vectors.Add(new Vector(new ReadOnlyMemory<float>(embedding)));
+                }
+                else
+                {
+                    vectors.Add(null);
+                }
             }
 
             // Keep alignment with the requested inputs (empty inputs have no vector).
@@ -82,7 +83,7 @@ public class EmbeddingService(
                 offset++;
             }
 
-            logger.LogInformation("Embedded {Count} texts with {Model}", items.Count, _embeddingModel);
+            logger.LogInformation("Embedded {Count} texts with {Model} via OllamaSharp", items.Count, _embeddingModel);
             return result;
         }
         catch (Exception ex)
