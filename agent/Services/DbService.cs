@@ -76,7 +76,7 @@ public class DbService(FormFillingDbContext db)
                 .Select(f => new
                 {
                     Form = f,
-                    Distance = f.Embedding!.L2Distance(searchVector),
+                    Distance = f.Embedding!.CosineDistance(searchVector),
                     Count = f.Submissions.Count,
                 })
                 .OrderBy(x => x.Distance)
@@ -261,7 +261,7 @@ public class DbService(FormFillingDbContext db)
 
     /// <summary>
     /// Search document chunks by semantic similarity using vector embedding.
-    /// Returns the most relevant chunks ordered by L2 distance.
+    /// Returns the most relevant chunks ordered by cosine distance.
     /// </summary>
     public async Task<List<KnowledgeChunkInfo>> SearchKnowledge(Vector queryVector, int limit = 5)
     {
@@ -270,7 +270,7 @@ public class DbService(FormFillingDbContext db)
             .Select(c => new
             {
                 Chunk = c,
-                Distance = c.Embedding!.L2Distance(queryVector),
+                Distance = c.Embedding!.CosineDistance(queryVector),
             })
             .OrderBy(x => x.Distance)
             .Take(limit)
