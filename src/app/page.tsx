@@ -4,8 +4,8 @@ import {
   CopilotChatConfigurationProvider,
   CopilotSidebar,
   useRenderTool,
+  useAgent,
 } from "@copilotkit/react-core/v2";
-import { useCoAgent } from "@copilotkit/react-core";
 import { ThreadsDrawer } from "@/components/threads-drawer";
 import { useEffect, useState, type ReactNode } from "react";
 import { CheckCircle, FileSearch, ClipboardList, PenLine, Loader2, Plus, Trash2 } from "lucide-react";
@@ -168,7 +168,13 @@ function MinerUToolCallCard({
 }
 
 function MinerUContent() {
-  const { state } = useCoAgent<MinerUState>({ name: "minerU" });
+  const { state } = useAgent<MinerUState>({ name: "minerU" });
+
+  // Debug: log state changes
+  useEffect(() => {
+    console.log('🔍 MinerU State:', state);
+  }, [state]);
+  console.log('calling state', state)
 
   useRenderTool(
     {
@@ -195,6 +201,9 @@ function MinerUContent() {
     const fills = state?.fills;
     const singleFormId = state?.formId;
 
+    console.log('📋 Form fills:', fills);
+    console.log('📝 Single formId:', singleFormId);
+
     // Use fills array if available, otherwise fall back to single formId
     const formEntries = fills?.length
       ? fills.map((f) => ({ formId: f.formId, filledValues: f.filledValues }))
@@ -203,12 +212,15 @@ function MinerUContent() {
         : [];
 
     if (formEntries.length === 0) {
+      console.log('⚠️ No form entries found');
       setFormsList([]);
       setFormsValues({});
       setFormsSubmitted({});
       setFormsErrors({});
       return;
     }
+
+    console.log('✅ Form entries:', formEntries);
 
     // Fetch all forms in parallel
     Promise.all(

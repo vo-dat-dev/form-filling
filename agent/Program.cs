@@ -151,8 +151,27 @@ api.MapGet("/threads", async (DbService db, string? agentId) =>
 
 api.MapPost("/threads", async (DbService db, CreateThreadRequest body) =>
 {
-    var thread = await db.CreateThread(body.AgentId ?? "minerU", body.Title ?? "New Conversation");
-    return Results.Ok(thread);
+    // Support custom threadId from CopilotKit (upsert pattern)
+    if (!string.IsNullOrEmpty(body.ThreadId))
+    {
+        // Try to get existing thread first
+        var existing = await db.GetThread(body.ThreadId);
+        if (existing != null)
+        {
+            // Thread exists, just update timestamp
+            var updated = await db.UpdateThread(body.ThreadId, body.Title, null);
+            return Results.Ok(updated);
+        }
+        // Thread doesn't exist, create with custom ID
+        var thread = await db.CreateThreadWithId(body.ThreadId, body.AgentId ?? "minerU", body.Title ?? "New Conversation");
+        return Results.Ok(thread);
+    }
+    else
+    {
+        // Auto-generate ID (original behavior)
+        var thread = await db.CreateThread(body.AgentId ?? "minerU", body.Title ?? "New Conversation");
+        return Results.Ok(thread);
+    }
 });
 
 api.MapPatch("/threads/{id}", async (DbService db, string id, UpdateThreadRequest body) =>
@@ -242,7 +261,7 @@ public partial class Program
 
 // ---- Request DTOs ----
 
-public record CreateThreadRequest(string? AgentId, string? Title);
+public record CreateThreadRequest(string? ThreadId, string? AgentId, string? Title);
 public record UpdateThreadRequest(string? Title, string? Metadata);
 public record CreateFormRequest(string Title, string? Description, string Fields);
 public record UpdateFormRequest(string Title, string? Description, string Fields);

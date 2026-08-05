@@ -39,6 +39,21 @@ public class DbService(FormFillingDbContext db)
         };
     }
 
+    public async Task<ThreadInfo> CreateThreadWithId(string id, string agentId, string title)
+    {
+        var entity = new ThreadEf { Id = id, AgentId = agentId, Title = title };
+        db.Threads.Add(entity);
+        await db.SaveChangesAsync();
+        return new ThreadInfo
+        {
+            Id = entity.Id,
+            AgentId = entity.AgentId,
+            Title = entity.Title,
+            CreatedAt = entity.CreatedAt,
+            UpdatedAt = entity.UpdatedAt,
+        };
+    }
+
     public async Task<ThreadInfo?> UpdateThread(string id, string? title, string? metadata)
     {
         var entity = await db.Threads.FindAsync(id);
