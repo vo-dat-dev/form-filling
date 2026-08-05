@@ -167,6 +167,12 @@ internal sealed class FormFieldDto
     [JsonPropertyName("label")]
     public string Label { get; set; } = "";
 
+    [JsonPropertyName("placeholder")]
+    public string? Placeholder { get; set; }
+
+    [JsonPropertyName("helpText")]
+    public string? HelpText { get; set; }
+
     [JsonPropertyName("required")]
     public bool Required { get; set; }
 
@@ -208,4 +214,13 @@ internal sealed class KnowledgeChunkDto
 
     [JsonPropertyName("fileName")]
     public string? FileName { get; set; }
+}
+
+internal sealed class ParsedDocumentDto
+{
+    [JsonPropertyName("documentId")]
+    public string DocumentId { get; set; } = "";
+
+    [JsonPropertyName("mediaType")]
+    public string? MediaType { get; set; }
 }

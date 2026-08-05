@@ -263,10 +263,15 @@ public class DbService(FormFillingDbContext db)
     /// Search document chunks by semantic similarity using vector embedding.
     /// Returns the most relevant chunks ordered by cosine distance.
     /// </summary>
-    public async Task<List<KnowledgeChunkInfo>> SearchKnowledge(Vector queryVector, int limit = 5)
+    public async Task<List<KnowledgeChunkInfo>> SearchKnowledge(Vector queryVector, int limit = 5, string? documentId = null)
     {
-        var results = await db.DocumentChunks
-            .Where(c => c.Embedding != null)
+        var query = db.DocumentChunks
+            .Where(c => c.Embedding != null);
+
+        if (!string.IsNullOrWhiteSpace(documentId))
+            query = query.Where(c => c.DocumentId == documentId);
+
+        var results = await query
             .Select(c => new
             {
                 Chunk = c,
@@ -288,6 +293,50 @@ public class DbService(FormFillingDbContext db)
     }
 
     // ---- Documents & chunks ----
+
+    /// <summary>
+    /// Returns the most recently created documents (used to list parsed docs).
+    /// </summary>
+    public async Task<List<DocumentInfo>> ListDocuments(int limit = 20)
+    {
+        return await db.Documents
+            .OrderByDescending(d => d.CreatedAt)
+            .Take(limit)
+            .Select(d => new DocumentInfo
+            {
+                Id = d.Id,
+                FileName = d.FileName,
+                MediaType = d.MediaType,
+                Content = d.Content,
+                CreatedAt = d.CreatedAt,
+                UpdatedAt = d.UpdatedAt,
+                ParentChunkCount = d.Chunks.Count(c => c.ChunkType == "parent"),
+                ChildChunkCount = d.Chunks.Count(c => c.ChunkType == "child"),
+            })
+            .ToListAsync();
+    }
+
+    /// <summary>
+    /// Returns a single document by id with its full content.
+    /// </summary>
+    public async Task<DocumentInfo?> GetDocument(string id)
+    {
+        var d = await db.Documents
+            .Where(x => x.Id == id)
+            .Select(d => new DocumentInfo
+            {
+                Id = d.Id,
+                FileName = d.FileName,
+                MediaType = d.MediaType,
+                Content = d.Content,
+                CreatedAt = d.CreatedAt,
+                UpdatedAt = d.UpdatedAt,
+                ParentChunkCount = d.Chunks.Count(c => c.ChunkType == "parent"),
+                ChildChunkCount = d.Chunks.Count(c => c.ChunkType == "child"),
+            })
+            .FirstOrDefaultAsync();
+        return d;
+    }
 
     /// <summary>
     /// Persists a parsed document plus its parent/child chunks.
