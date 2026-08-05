@@ -16,7 +16,6 @@ const runtime = new CopilotRuntime({
       url: `${process.env.AGENT_URL || "http://localhost:8000"}/formFill`,
     }),
   },
-  // --- copilotkit:intelligence (remove this block to opt out) ---
   ...(process.env.COPILOTKIT_LICENSE_TOKEN
     ? {
         intelligence: new CopilotKitIntelligence({
@@ -29,7 +28,6 @@ const runtime = new CopilotRuntime({
         licenseToken: process.env.COPILOTKIT_LICENSE_TOKEN,
       }
     : { runner: new InMemoryAgentRunner() }),
-  // --- /copilotkit:intelligence ---
 });
 
 const app = createCopilotEndpoint({

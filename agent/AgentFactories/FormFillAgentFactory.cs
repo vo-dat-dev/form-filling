@@ -108,17 +108,15 @@ public class FormFillAgentFactory : IAgentFactory
                               - You MUST call fill_form MULTIPLE times if multiple files/forms are uploaded
                               - Each fill_form call should use data from the CORRECT document that matches that form type
                            
-                           e. **IMPORTANT: Show complete information for ALL forms filled IN VIETNAMESE:**
-                              - After filling all forms, provide a DETAILED summary for EACH form written in Vietnamese
-                              - For each form, list:
-                                * Form title (in Vietnamese)
-                                * Form ID (the "formId" value passed to fill_form) — DO NOT omit the ID, always include it
-                                * Which document/file it was filled from
-                                * ALL field names and their filled values
-                                * Any fields that could not be filled
-                              - DO NOT summarize or abbreviate — show FULL details for every single form
-                              - This summary MUST be in Vietnamese
-                              - The form ID MUST always be shown, never leave it out
+                           e. **Response summary IN VIETNAMESE — keep it SHORT:**
+                              - Just list which uploaded file matched which form
+                              - And which files did NOT find any matching form
+                              - Do NOT list every field name and value in the response
+                              - Do NOT repeat the full form content — the forms are already rendered on screen
+                              - Format example:
+                                * "File CCCD_cua_toi.pdf → Form CCCD/CMND"
+                                * "File don_xin_viec.pdf → Form Đơn xin việc"
+                                * "File hoa_don.pdf → Không tìm thấy form phù hợp"
                            
                            f. When filling values in fill_form:
                               - For "text", "number", "email", "tel", "textarea", "select", "radio", "date" fields: use the string value directly.
