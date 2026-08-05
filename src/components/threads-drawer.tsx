@@ -1,16 +1,10 @@
 "use client";
 
-import { useCopilotChatConfiguration } from "@copilotkit/react-core/v2";
-import { useEffect, useState, useCallback } from "react";
+import { useThreads, useCopilotChatConfiguration } from "@copilotkit/react-core/v2";
+import { useEffect, useState } from "react";
 import { Plus, Trash2, Pencil, Check, X } from "lucide-react";
 
-interface Thread {
-  id: string;
-  agentId: string;
-  title: string;
-  createdAt: string;
-  updatedAt: string;
-}
+
 
 interface ThreadsDrawerProps {
   agentId?: string;
@@ -36,21 +30,17 @@ function setThreadParam(threadId: string | null) {
 
 export function ThreadsDrawer({ agentId = "minerU" }: ThreadsDrawerProps) {
   const config = useCopilotChatConfiguration();
-  const [threads, setThreads] = useState<Thread[]>([]);
+  const {
+    threads,
+    isLoading,
+    renameThread,
+    archiveThread,
+    deleteThread,
+  } = useThreads({ agentId });
+  
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
-
-  const fetchThreads = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/threads?agentId=${agentId}`);
-      if (res.ok) setThreads(await res.json());
-    } catch { /* ignore */ }
-  }, [agentId]);
-
-  useEffect(() => {
-    fetchThreads();
-  }, [fetchThreads]);
 
   useEffect(() => {
     const threadFromUrl = getThreadParam();
@@ -58,53 +48,27 @@ export function ThreadsDrawer({ agentId = "minerU" }: ThreadsDrawerProps) {
       config.setActiveThreadId(threadFromUrl);
       setActiveThreadId(threadFromUrl);
     }
-  }, []);
+  }, [config]);
 
-  async function handleNew() {
-    try {
-      const res = await fetch("/api/threads", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agentId }),
-      });
-      if (res.ok) {
-        const thread: Thread = await res.json();
-        setThreads((prev) => [thread, ...prev]);
-        setThreadParam(thread.id);
-        config?.setActiveThreadId(thread.id);
-        setActiveThreadId(thread.id);
-      }
-    } catch { /* ignore */ }
+  function handleNew() {
+    setThreadParam(null);
+    config?.startNewThread();
+    setActiveThreadId(null);
   }
 
   async function handleDelete(id: string, e: React.MouseEvent) {
     e.stopPropagation();
-    try {
-      const res = await fetch(`/api/threads/${id}`, { method: "DELETE" });
-      if (res.ok) {
-        setThreads((prev) => prev.filter((t) => t.id !== id));
-        if (activeThreadId === id) {
-          setThreadParam(null);
-          config?.startNewThread();
-          setActiveThreadId(null);
-        }
-      }
-    } catch { /* ignore */ }
+    await deleteThread(id);
+    if (activeThreadId === id) {
+      setThreadParam(null);
+      config?.startNewThread();
+      setActiveThreadId(null);
+    }
   }
 
   async function handleRename(id: string) {
     if (!editTitle.trim()) return;
-    try {
-      const res = await fetch(`/api/threads/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: editTitle.trim() }),
-      });
-      if (res.ok) {
-        const updated: Thread = await res.json();
-        setThreads((prev) => prev.map((t) => (t.id === id ? updated : t)));
-      }
-    } catch { /* ignore */ }
+    await renameThread(id, editTitle.trim());
     setEditId(null);
   }
 
@@ -127,6 +91,9 @@ export function ThreadsDrawer({ agentId = "minerU" }: ThreadsDrawerProps) {
       </div>
 
       <nav className="flex-1 overflow-y-auto p-2 space-y-1">
+        {isLoading && (
+          <div className="text-center py-4 text-sm text-slate-400">Loading threads...</div>
+        )}
         {threads.map((thread) => (
           <div
             key={thread.id}
@@ -161,12 +128,12 @@ export function ThreadsDrawer({ agentId = "minerU" }: ThreadsDrawerProps) {
               </form>
             ) : (
               <>
-                <span className="flex-1 truncate">{thread.title}</span>
+                <span className="flex-1 truncate">{thread.name ?? "Untitled"}</span>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     setEditId(thread.id);
-                    setEditTitle(thread.title);
+                    setEditTitle(thread.name ?? "Untitled");
                   }}
                   className="p-0.5 opacity-0 group-hover:opacity-100 text-slate-400 hover:text-slate-600 transition-opacity"
                 >
