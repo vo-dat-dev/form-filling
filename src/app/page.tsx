@@ -7,12 +7,12 @@ import {
 } from "@copilotkit/react-core/v2";
 import { useCoAgent } from "@copilotkit/react-core";
 import { ThreadsDrawer } from "@/components/threads-drawer";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useRef, useLayoutEffect, type ReactNode } from "react";
 import { CheckCircle, FileSearch, ClipboardList, PenLine, Loader2, Plus, Trash2 } from "lucide-react";
 import type { FormField } from "@/lib/types";
 import styles from "./page.module.css";
 
-interface MinerUState {
+interface FormFillState {
   formId?: string;
   formTitle?: string;
   filledValues?: Record<string, unknown>;
@@ -32,9 +32,9 @@ interface FormData {
 
 export default function HomePage() {
   return (
-    <CopilotChatConfigurationProvider agentId="minerU">
+    <CopilotChatConfigurationProvider agentId="formFill">
       <div className={`${styles.layout} threadsLayout`}>
-        <ThreadsDrawer agentId="minerU" />
+        <ThreadsDrawer agentId="formFill" />
         <div className={styles.mainPanel}>
           <div className="h-screen flex flex-col bg-slate-50">
             <header className="flex items-center gap-4 px-6 py-3 bg-white border-b border-slate-200 shadow-sm">
@@ -47,7 +47,7 @@ export default function HomePage() {
             </header>
 
             <main className="flex-1 flex relative overflow-hidden">
-              <MinerUContent />
+              <FormFillContent />
               <CopilotSidebar
                 defaultOpen={true}
                 labels={{
@@ -82,7 +82,7 @@ const TOOL_META: Record<string, { label: string; icon: ReactNode }> = {
   },
 };
 
-function MinerUToolCallCard({
+function FormFillToolCallCard({
   name,
   status,
   args,
@@ -167,15 +167,15 @@ function MinerUToolCallCard({
   );
 }
 
-function MinerUContent() {
-  const { state } = useCoAgent<MinerUState>({ name: "minerU" });
+function FormFillContent() {
+  const { state } = useCoAgent<FormFillState>({ name: "formFill" });
 
   useRenderTool(
     {
       name: "*",
-      agentId: "minerU",
+      agentId: "formFill",
       render: ({ name, args, status, result }) => (
-        <MinerUToolCallCard
+        <FormFillToolCallCard
           name={name}
           status={status as ToolStatus}
           args={args as Record<string, unknown>}
@@ -317,9 +317,6 @@ function MinerUContent() {
           const submitted = formsSubmitted[formId];
           const submitting = formsSubmitting[formId];
           const errors = formsErrors[formId] ?? {};
-          const isAiMatched = state?.fills
-            ? state.fills.some((f) => f.formId === formId)
-            : formId === state?.formId;
 
           if (submitted) {
             return (
@@ -333,18 +330,9 @@ function MinerUContent() {
 
           return (
             <div key={formId} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-              <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
-                {isAiMatched && (
-                  <span className="inline-flex items-center px-2 py-0.5 bg-indigo-50 text-indigo-700 text-xs font-medium rounded-full">
-                    ✓ AI matched
-                  </span>
-                )}
-                <div>
-                  <h2 className="text-base font-semibold text-slate-800">{form.title}</h2>
-                  {form.description && (
-                    <p className="text-xs text-slate-500 mt-0.5">{form.description}</p>
-                  )}
-                </div>
+              <div className="px-5 py-4 border-b border-slate-100">
+                <h2 className="text-base font-semibold text-slate-800">{form.title}</h2>
+                {form.description && <FormDescription text={form.description} />}
               </div>
 
               <form onSubmit={(e) => handleSubmit(formId, e)} className="px-5 py-4 space-y-4">
@@ -372,6 +360,38 @@ function MinerUContent() {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function FormDescription({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [isClamped, setIsClamped] = useState(false);
+  const ref = useRef<HTMLParagraphElement>(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    setIsClamped(el.scrollHeight > el.clientHeight);
+  }, [text]);
+
+  return (
+    <div className="mt-0.5">
+      <p
+        ref={ref}
+        className={`text-xs text-slate-500 leading-relaxed ${expanded ? "" : "line-clamp-3"}`}
+      >
+        {text}
+      </p>
+      {isClamped && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="text-xs text-indigo-600 hover:text-indigo-800 mt-1 font-medium"
+        >
+          {expanded ? "Thu gọn" : "Xem thêm"}
+        </button>
+      )}
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { threadsService } from "@/services";
 
 export async function GET(request: NextRequest) {
   try {
-    const agentId = request.nextUrl.searchParams.get("agentId") ?? "minerU";
+    const agentId = request.nextUrl.searchParams.get("agentId") ?? "formFill";
     const threads = await threadsService.list(agentId);
     return NextResponse.json(threads);
   } catch (error) {
@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const thread = await threadsService.create({
-      agentId: body.agentId ?? "minerU",
+      agentId: body.agentId ?? "formFill",
       title: body.title ?? "New Conversation",
     });
     return NextResponse.json(thread, { status: 201 });

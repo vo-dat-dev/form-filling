@@ -6,13 +6,13 @@ using Microsoft.Agents.AI;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.AI;
 
-[SuppressMessage("Performance", "CA1812", Justification = "Instantiated by MinerUAgentFactory")]
-internal sealed class MinerUAgent : DelegatingAIAgent
+[SuppressMessage("Performance", "CA1812", Justification = "Instantiated by FormFillAgentFactory")]
+internal sealed class FormFillAgent : DelegatingAIAgent
 {
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ILogger _logger;
 
-    public MinerUAgent(
+    public FormFillAgent(
         AIAgent innerAgent,
         IHttpContextAccessor httpContextAccessor,
         ILogger logger)
@@ -43,9 +43,9 @@ internal sealed class MinerUAgent : DelegatingAIAgent
             yield return update;
 
         // Emit all form fills accumulated during the run
-        if (_httpContextAccessor.HttpContext?.Items["__form_fills__"] is List<MinerUFormFill> formFills && formFills.Count > 0)
+        if (_httpContextAccessor.HttpContext?.Items["__form_fills__"] is List<FormFillResult> formFills && formFills.Count > 0)
         {
-            var stateBytes = JsonSerializer.SerializeToUtf8Bytes(new MinerUFormFillList { Fills = formFills });
+            var stateBytes = JsonSerializer.SerializeToUtf8Bytes(new FormFillResultList { Fills = formFills });
             yield return new AgentResponseUpdate
             {
                 Contents = [new DataContent(stateBytes, "application/json")]
@@ -120,7 +120,7 @@ internal sealed class MinerUAgent : DelegatingAIAgent
 
 // ── State & DTO models ─────────────────────────────────────────────────────────
 
-internal sealed class MinerUFormFill
+internal sealed class FormFillResult
 {
     [JsonPropertyName("formId")]
     public string? FormId { get; set; }
@@ -132,10 +132,10 @@ internal sealed class MinerUFormFill
     public Dictionary<string, JsonElement>? FilledValues { get; set; }
 }
 
-internal sealed class MinerUFormFillList
+internal sealed class FormFillResultList
 {
     [JsonPropertyName("fills")]
-    public List<MinerUFormFill> Fills { get; set; } = [];
+    public List<FormFillResult> Fills { get; set; } = [];
 }
 
 internal sealed class FormDto

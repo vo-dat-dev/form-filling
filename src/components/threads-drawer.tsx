@@ -28,7 +28,7 @@ function setThreadParam(threadId: string | null) {
   window.history.replaceState(null, "", url);
 }
 
-export function ThreadsDrawer({ agentId = "minerU" }: ThreadsDrawerProps) {
+export function ThreadsDrawer({ agentId = "formFill" }: ThreadsDrawerProps) {
   const config = useCopilotChatConfiguration();
   const {
     threads,
@@ -69,7 +69,6 @@ export function ThreadsDrawer({ agentId = "minerU" }: ThreadsDrawerProps) {
   async function handleRename(id: string) {
     if (!editTitle.trim()) return;
     await renameThread(id, editTitle.trim());
-    setEditId(null);
   }
 
   function selectThread(id: string) {

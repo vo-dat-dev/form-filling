@@ -96,7 +96,7 @@ switch (parserStrategy.ToLowerInvariant())
 }
 
 // Register agent factories — DI injects all dependencies automatically
-builder.Services.AddSingleton<IAgentFactory, MinerUAgentFactory>();
+builder.Services.AddSingleton<IAgentFactory, FormFillAgentFactory>();
 
 WebApplication app = builder.Build();
 
@@ -147,11 +147,11 @@ var api = app.MapGroup("/api");
 
 // Threads
 api.MapGet("/threads", async (DbService db, string? agentId) =>
-    Results.Ok(await db.ListThreads(agentId ?? "minerU")));
+    Results.Ok(await db.ListThreads(agentId ?? "formFill")));
 
 api.MapPost("/threads", async (DbService db, CreateThreadRequest body) =>
 {
-    var thread = await db.CreateThread(body.AgentId ?? "minerU", body.Title ?? "New Conversation");
+    var thread = await db.CreateThread(body.AgentId ?? "formFill", body.Title ?? "New Conversation");
     return Results.Ok(thread);
 });
 
@@ -250,5 +250,5 @@ public record UpdateFormRequest(string Title, string? Description, string Fields
 // Serializer context covering types from all agent factories
 [JsonSerializable(typeof(List<FormDto>))]
 [JsonSerializable(typeof(FormDto))]
-[JsonSerializable(typeof(MinerUFormFillList))]
+[JsonSerializable(typeof(FormFillResultList))]
 internal sealed partial class AgentSerializerContext : JsonSerializerContext;

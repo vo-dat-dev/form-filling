@@ -12,8 +12,8 @@ const runtime = new CopilotRuntime({
     default: new HttpAgent({
       url: process.env.AGENT_URL || "http://localhost:8000/",
     }),
-    minerU: new HttpAgent({
-      url: `${process.env.AGENT_URL || "http://localhost:8000"}/minerU`,
+    formFill: new HttpAgent({
+      url: `${process.env.AGENT_URL || "http://localhost:8000"}/formFill`,
     }),
   },
   // --- copilotkit:intelligence (remove this block to opt out) ---

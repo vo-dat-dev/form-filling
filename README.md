@@ -96,7 +96,7 @@ This is a starter template for building AI agents using [Microsoft Agent Framewo
    (defaults to `https://api.openai.com/v1`).
 
    The agent registers a single shared `IChatClient` as a singleton and both
-   factories (proverbs and minerU) inject the same instance. Two implementations
+   factories (proverbs and formFill) inject the same instance. Two implementations
    are available: `OllamaChatClientImpl` (default) and `OpenAIChatClientImpl`.
    The provider is selected via `CHAT__PROVIDER` (`ollama` or `openai`).
    The model is configured via `CHAT__MODEL` (default: `gpt-4o-mini`).

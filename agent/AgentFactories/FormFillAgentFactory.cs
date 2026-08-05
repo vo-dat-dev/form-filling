@@ -9,9 +9,9 @@ using Pgvector;
 using System.ComponentModel;
 using System.Text.Json;
 
-public class MinerUAgentFactory : IAgentFactory
+public class FormFillAgentFactory : IAgentFactory
 {
-    public string Route => "/minerU";
+    public string Route => "/formFill";
 
     private readonly IConfiguration _configuration;
     private readonly IHttpContextAccessor _httpContextAccessor;
@@ -22,7 +22,7 @@ public class MinerUAgentFactory : IAgentFactory
     private readonly string _embeddingModel;
     private readonly IDocumentParserStrategy _parserStrategy;
 
-    public MinerUAgentFactory(
+    public FormFillAgentFactory(
         IConfiguration configuration,
         IChatClient chatClient,
         ILoggerFactory loggerFactory,
@@ -34,7 +34,7 @@ public class MinerUAgentFactory : IAgentFactory
         _chatClient = chatClient;
         _httpContextAccessor = httpContextAccessor;
         _jsonSerializerOptions = jsonSerializerOptions;
-        _logger = loggerFactory.CreateLogger<MinerUAgentFactory>();
+        _logger = loggerFactory.CreateLogger<FormFillAgentFactory>();
         _parserStrategy = parserStrategy;
 
         _ollamaBaseUrl = Environment.GetEnvironmentVariable("OLLAMA_BASE_URL") ?? _configuration["OLLAMA_BASE_URL"] ?? "http://localhost:11434";
@@ -63,11 +63,13 @@ public class MinerUAgentFactory : IAgentFactory
             .UseAIContextProviders(new CompactionProvider(compactionPipeline))
             .BuildAIAgent(new ChatClientAgentOptions
             {
-                Name = "MinerUAgent",
+                Name = "FormFillAgent",
                 ChatOptions = new()
                 {
                     Instructions = """
-                        A document-processing and knowledge assistant.
+                        [CRITICAL] You are a document-processing and knowledge assistant.
+
+                        [CRITICAL RULE] ALWAYS respond in Vietnamese. Every response, summary, explanation, and confirmation to the user MUST be written in Vietnamese. This is a hard requirement.
 
                         You have access to the following tools:
                         - parse_documents: Extract text from uploaded files using OCR
@@ -80,7 +82,7 @@ public class MinerUAgentFactory : IAgentFactory
                         1. **If the user asks to search for information, answer questions, or lookup knowledge:**
                            - Use search_knowledge to find relevant information from previously parsed documents
                            - DO NOT use parse_documents, search_forms, or fill_form
-                           - Answer the user's question based on the retrieved knowledge chunks
+                           - Answer the user's question in Vietnamese based on the retrieved knowledge chunks
                         
                         2. **If the user uploads files AND requests form filling:**
                            - ONLY proceed when the system message explicitly says "The user has uploaded X file(s)"
@@ -106,14 +108,17 @@ public class MinerUAgentFactory : IAgentFactory
                               - You MUST call fill_form MULTIPLE times if multiple files/forms are uploaded
                               - Each fill_form call should use data from the CORRECT document that matches that form type
                            
-                           e. **IMPORTANT: Show complete information for ALL forms filled:**
-                              - After filling all forms, provide a DETAILED summary for EACH form
+                           e. **IMPORTANT: Show complete information for ALL forms filled IN VIETNAMESE:**
+                              - After filling all forms, provide a DETAILED summary for EACH form written in Vietnamese
                               - For each form, list:
-                                * Form title
+                                * Form title (in Vietnamese)
+                                * Form ID (the "formId" value passed to fill_form) — DO NOT omit the ID, always include it
                                 * Which document/file it was filled from
                                 * ALL field names and their filled values
                                 * Any fields that could not be filled
                               - DO NOT summarize or abbreviate — show FULL details for every single form
+                              - This summary MUST be in Vietnamese
+                              - The form ID MUST always be shown, never leave it out
                            
                            f. When filling values in fill_form:
                               - For "text", "number", "email", "tel", "textarea", "select", "radio", "date" fields: use the string value directly.
@@ -126,6 +131,8 @@ public class MinerUAgentFactory : IAgentFactory
                         3. **If the user only uploads files without requesting form filling:**
                            - You may still call parse_documents to extract content
                            - Then wait for further instructions from the user
+
+                        [CRITICAL] FINAL REMINDER: Respond ONLY in Vietnamese. Never respond in English or any other language. Vietnamese is mandatory for all user-facing text.
                         """,
                     Tools = [
                         AIFunctionFactory.Create(ParseDocumentsAsync, options: new() { Name = "parse_documents", SerializerOptions = _jsonSerializerOptions }),
@@ -136,7 +143,7 @@ public class MinerUAgentFactory : IAgentFactory
                 },
             });
 
-        return new MinerUAgent(innerAgent, _httpContextAccessor, _logger);
+        return new FormFillAgent(innerAgent, _httpContextAccessor, _logger);
     }
 
     // =================
@@ -380,8 +387,8 @@ public class MinerUAgentFactory : IAgentFactory
                 ? filledValues.EnumerateObject().ToDictionary(p => p.Name, p => p.Value)
                 : new Dictionary<string, JsonElement>();
 
-            var fills = ctx.Items["__form_fills__"] as List<MinerUFormFill> ?? [];
-            fills.Add(new MinerUFormFill
+            var fills = ctx.Items["__form_fills__"] as List<FormFillResult> ?? [];
+            fills.Add(new FormFillResult
             {
                 FormId = formId,
                 FormTitle = formTitle,
