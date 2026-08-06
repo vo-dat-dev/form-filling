@@ -224,3 +224,18 @@ internal sealed class ParsedDocumentDto
     [JsonPropertyName("mediaType")]
     public string? MediaType { get; set; }
 }
+
+internal sealed class DocumentSummaryDto
+{
+    [JsonPropertyName("documentId")]
+    public string DocumentId { get; set; } = "";
+
+    [JsonPropertyName("fileName")]
+    public string? FileName { get; set; }
+
+    [JsonPropertyName("mediaType")]
+    public string? MediaType { get; set; }
+
+    [JsonPropertyName("content")]
+    public string Content { get; set; } = "";
+}
