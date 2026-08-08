@@ -11,7 +11,7 @@ using Pgvector;
 
 namespace ProverbsAgent.Migrations
 {
-    [DbContext(typeof(FormFillingDbContext))]
+    [DbContext(typeof(ApplicationDbContext))]
     [Migration("20260804042711_AddVectorExtension")]
     partial class AddVectorExtension
     {

@@ -11,7 +11,7 @@ using Pgvector;
 
 namespace ProverbsAgent.Migrations
 {
-    [DbContext(typeof(FormFillingDbContext))]
+    [DbContext(typeof(ApplicationDbContext))]
     [Migration("20260804102132_AddDocumentChunking")]
     partial class AddDocumentChunking
     {

@@ -44,8 +44,10 @@ static string ToNpgsqlConnString(string? url)
 }
 var rawConn = Environment.GetEnvironmentVariable("DATABASE_URL");
 var connString = ToNpgsqlConnString(rawConn);
-builder.Services.AddDbContext<FormFillingDbContext>(options =>
+builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(connString, npgsql => npgsql.UseVector()));
+builder.Services.AddScoped<IApplicationDbContext>(
+    provider => provider.GetRequiredService<ApplicationDbContext>());
 builder.Services.AddScoped<DbService>();
 builder.Services.AddSingleton<EmbeddingService>();
 
@@ -132,7 +134,7 @@ try
 {
     using (var scope = app.Services.CreateScope())
     {
-        var db = scope.ServiceProvider.GetRequiredService<FormFillingDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         await db.Database.MigrateAsync();
     }
 }
@@ -141,88 +143,8 @@ catch (Exception ex)
     app.Logger.LogWarning(ex, "Database migration skipped");
 }
 
-// ---- Data API endpoints ----
-
-var api = app.MapGroup("/api");
-
-// Threads
-api.MapGet("/threads", async (DbService db, string? agentId) =>
-    Results.Ok(await db.ListThreads(agentId ?? "formFill")));
-
-api.MapPost("/threads", async (DbService db, CreateThreadRequest body) =>
-{
-    var thread = await db.CreateThread(body.AgentId ?? "formFill", body.Title ?? "New Conversation");
-    return Results.Ok(thread);
-});
-
-api.MapPatch("/threads/{id}", async (DbService db, string id, UpdateThreadRequest body) =>
-{
-    var thread = await db.UpdateThread(id, body.Title, body.Metadata);
-    return thread != null ? Results.Ok(thread) : Results.NotFound();
-});
-
-api.MapDelete("/threads/{id}", async (DbService db, string id) =>
-{
-    var ok = await db.DeleteThread(id);
-    return ok ? Results.Ok(new { success = true }) : Results.NotFound();
-});
-
-// Forms
-api.MapGet("/forms", async (DbService db, string? q) =>
-{
-    if (!string.IsNullOrWhiteSpace(q))
-        return Results.Ok(await db.ListForms(ParseVector(q)));
-    return Results.Ok(await db.ListForms());
-});
-
-api.MapGet("/forms/{id}", async (DbService db, string id) =>
-{
-    var form = await db.GetForm(id);
-    return form != null ? Results.Ok(form) : Results.NotFound();
-});
-
-api.MapPost("/forms", async (DbService db, EmbeddingService embeddings, CreateFormRequest body) =>
-{
-    var embedding = await embeddings.EmbedAsync(body.Description);
-    var form = await db.CreateForm(body.Title, body.Description, body.Fields, embedding);
-    return Results.Ok(form);
-});
-
-api.MapPut("/forms/{id}", async (DbService db, EmbeddingService embeddings, string id, UpdateFormRequest body) =>
-{
-    var existing = await db.GetForm(id);
-    if (existing == null) return Results.NotFound();
-
-    var descriptionChanged = body.Description != existing.Description;
-    var newEmbedding = descriptionChanged
-        ? await embeddings.EmbedAsync(body.Description)
-        : null;
-
-    var form = await db.UpdateForm(id, body.Title, body.Description, body.Fields, newEmbedding, descriptionChanged);
-    return form != null ? Results.Ok(form) : Results.NotFound();
-});
-
-api.MapDelete("/forms/{id}", async (DbService db, string id) =>
-{
-    var ok = await db.DeleteForm(id);
-    return ok ? Results.Ok(new { success = true }) : Results.NotFound();
-});
-
-// Submissions
-api.MapGet("/forms/{formId}/submissions", async (DbService db, string formId) =>
-    Results.Ok(await db.ListSubmissions(formId)));
-
-api.MapPost("/forms/{formId}/submissions", async (DbService db, string formId, JsonElement body) =>
-{
-    var submission = await db.CreateSubmission(formId, body.GetRawText());
-    return submission != null ? Results.Ok(submission) : Results.NotFound();
-});
-
-api.MapGet("/submissions/{id}", async (DbService db, string id) =>
-{
-    var submission = await db.GetSubmission(id);
-    return submission != null ? Results.Ok(submission) : Results.NotFound();
-});
+// ---- Data API endpoints (EndpointGroupBase pattern) ----
+app.MapEndpoints();
 
 // Scan all IAgentFactory implementations and map their routes
 foreach (var factory in app.Services.GetServices<IAgentFactory>())

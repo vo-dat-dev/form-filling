@@ -22,12 +22,13 @@
       "resource": {
           "type": "local",
           "command": [
-              "npx",
-              "-y",
-              "@modelcontextprotocol/server-filesystem",
+              "sand-mcp-fs",
+              "--max-file-size",
+              "100MB",
               "/Users/votiendat/WorkSpace/demo/ResOCR",
               "/Users/votiendat/WorkSpace/demo/weknora",
-              "/"
+              "/Users/votiendat/WorkSpace/demo/camunda-copilotkit/src/Web",
+              "/Users/votiendat/WorkSpace/demo/form-filling"
           ],
           "enabled": true
       }

@@ -3,13 +3,14 @@ using Pgvector;
 using Pgvector.EntityFrameworkCore;
 using System.Text.Json.Serialization;
 
-public class DbService(FormFillingDbContext db)
+public class DbService(IApplicationDbContext db)
 {
     // ---- Threads ----
 
     public async Task<List<ThreadInfo>> ListThreads(string agentId)
     {
         var threads = await db.Threads
+            .AsNoTracking()
             .Where(t => t.AgentId == agentId)
             .OrderByDescending(t => t.UpdatedAt)
             .Select(t => new ThreadInfo
@@ -72,6 +73,7 @@ public class DbService(FormFillingDbContext db)
         if (searchVector != null)
         {
             return await db.Forms
+                .AsNoTracking()
                 .Where(f => f.Embedding != null)
                 .Select(f => new
                 {
@@ -96,6 +98,7 @@ public class DbService(FormFillingDbContext db)
         }
 
         var all = await db.Forms
+            .AsNoTracking()
             .OrderByDescending(f => f.UpdatedAt)
             .Select(f => new FormInfo
             {
@@ -114,6 +117,7 @@ public class DbService(FormFillingDbContext db)
     public async Task<FormInfo?> GetForm(string id)
     {
         var form = await db.Forms
+            .AsNoTracking()
             .Where(f => f.Id == id)
             .Select(f => new FormInfo
             {
@@ -169,7 +173,7 @@ public class DbService(FormFillingDbContext db)
 
         await db.SaveChangesAsync();
 
-        var embedding = descriptionChanged ? newEmbedding?.ToString() : await GetFormEmbedding(id);
+        var embedding = (descriptionChanged ? newEmbedding : entity.Embedding)?.ToString();
         return new FormInfo
         {
             Id = entity.Id,
@@ -191,20 +195,12 @@ public class DbService(FormFillingDbContext db)
         return true;
     }
 
-    public async Task<string?> GetFormEmbedding(string id)
-    {
-        var result = await db.Database.SqlQueryRaw<string>(
-            """SELECT embedding::text FROM "Form" WHERE id = $1""",
-            [id]
-        ).FirstOrDefaultAsync();
-        return result;
-    }
-
     // ---- Submissions ----
 
     public async Task<List<SubmissionInfo>> ListSubmissions(string formId)
     {
         var submissions = await db.FormSubmissions
+            .AsNoTracking()
             .Where(s => s.FormId == formId)
             .OrderByDescending(s => s.CreatedAt)
             .Select(s => new SubmissionInfo
@@ -238,6 +234,7 @@ public class DbService(FormFillingDbContext db)
     public async Task<SubmissionInfo?> GetSubmission(string id)
     {
         var submission = await db.FormSubmissions
+            .AsNoTracking()
             .Where(s => s.Id == id)
             .Select(s => new SubmissionInfo
             {
@@ -266,6 +263,7 @@ public class DbService(FormFillingDbContext db)
     public async Task<List<KnowledgeChunkInfo>> SearchKnowledge(Vector queryVector, int limit = 5, string? documentId = null)
     {
         var query = db.DocumentChunks
+            .AsNoTracking()
             .Where(c => c.Embedding != null);
 
         if (!string.IsNullOrWhiteSpace(documentId))
@@ -300,6 +298,7 @@ public class DbService(FormFillingDbContext db)
     public async Task<List<DocumentInfo>> ListDocuments(int limit = 20)
     {
         return await db.Documents
+            .AsNoTracking()
             .OrderByDescending(d => d.CreatedAt)
             .Take(limit)
             .Select(d => new DocumentInfo
@@ -322,6 +321,7 @@ public class DbService(FormFillingDbContext db)
     public async Task<DocumentInfo?> GetDocument(string id)
     {
         var d = await db.Documents
+            .AsNoTracking()
             .Where(x => x.Id == id)
             .Select(d => new DocumentInfo
             {

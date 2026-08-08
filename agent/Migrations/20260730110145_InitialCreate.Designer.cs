@@ -10,7 +10,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 namespace ProverbsAgent.Migrations
 {
-    [DbContext(typeof(FormFillingDbContext))]
+    [DbContext(typeof(ApplicationDbContext))]
     [Migration("20260730110145_InitialCreate")]
     partial class InitialCreate
     {

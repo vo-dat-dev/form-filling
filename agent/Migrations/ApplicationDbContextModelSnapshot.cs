@@ -10,8 +10,8 @@ using Pgvector;
 
 namespace ProverbsAgent.Migrations
 {
-    [DbContext(typeof(FormFillingDbContext))]
-    partial class FormFillingDbContextModelSnapshot : ModelSnapshot
+    [DbContext(typeof(ApplicationDbContext))]
+    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
     {
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
