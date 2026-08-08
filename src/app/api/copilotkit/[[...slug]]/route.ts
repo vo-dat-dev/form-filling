@@ -16,18 +16,7 @@ const runtime = new CopilotRuntime({
       url: `${process.env.AGENT_URL || "http://localhost:8000"}/formFill`,
     }),
   },
-  ...(process.env.COPILOTKIT_LICENSE_TOKEN
-    ? {
-        intelligence: new CopilotKitIntelligence({
-          apiKey: process.env.INTELLIGENCE_API_KEY ?? "",
-          apiUrl: process.env.INTELLIGENCE_API_URL ?? "http://localhost:4201",
-          wsUrl:
-            process.env.INTELLIGENCE_GATEWAY_WS_URL ?? "ws://localhost:4401",
-        }),
-        identifyUser: () => ({ id: "demo-user", name: "Demo User" }),
-        licenseToken: process.env.COPILOTKIT_LICENSE_TOKEN,
-      }
-    : { runner: new InMemoryAgentRunner() }),
+ runner: new InMemoryAgentRunner()  
 });
 
 const app = createCopilotEndpoint({
