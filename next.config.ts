@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  typescript: { ignoreBuildErrors: true },
+  typescript: { ignoreBuildErrors: false },
   serverExternalPackages: ["@copilotkit/runtime"],
   experimental: {},
   env: {
